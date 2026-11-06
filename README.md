@@ -118,25 +118,73 @@ GitHub → **Actions** → **Build hummer phDroid module (LineageOS 24 / 6.6.144
 - Artifacts：`phdroid-hummer-<run_id>`（zip + ko + build-info）
 - Release：`phDroid-v1.0.4-hummer.zip` 或 `...-safe.zip`
 
-### 本次构建结果
+### 本次构建结果（安全兜底版）
 
-- run（正常包）：https://github.com/Dry-Earth/LKM-Droidspaces/actions/runs/42223499194
-- Release：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-hummer-42223499194
+以下两个包是用已经验证过 clang/Kdir 的 ko（run `42223499194`）重新打包的，
+只有 `module/` 脚本更新，ko 没变。
+
+**正常包：**
+
+- Release：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-hummer-safety-42236045133
 - zip：`phDroid-v1.0.4-hummer.zip`（2.8 MB）
-- sha256：`c35e18ef27c0eba9ab32dfe23521daf46b14e22db3e1707d0db2267d970cf1b5`
-- KDIR：`6.6.144-4k-g6350e8af3f4c`
-- clang：**原厂 r596125**（`clang version 22.0.2`）
-- 模块 vermagic：`6.6.144-4k-g6350e8af3f4c SMP preempt mod_unload modversions aarch64`
+- sha256：`58677db835dc1bba346c9a487afeeb554e765687a191e7a6482c3ebe31b2776b`
 
-> 之前有一次构建（`42217948372`）KDIR 用了 DDK r510928、模块用了 r596125，
-> 属于**混编**，已删除 Release。请只使用 `42223499194` 这个或之后的版本。
+**安全模式包（`skip_do_exit=1` + `compat=off`）：**
 
-安全模式包（`skip_do_exit=1` + `compat=off`）：
-
-- run：https://github.com/Dry-Earth/LKM-Droidspaces/actions/runs/42228372442
-- Release：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-hummer-42228372442
+- Release：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-hummer-safety-42236240331
 - zip：`phDroid-v1.0.4-hummer-safe.zip`
-- sha256：`11ea43e99ff7475304658539ef401bd4c47bb778cab27bcb62024d11cf55065f`
+- sha256：`7d0c67d051f44f9b2b0798a1342ecfcda6beec473bfa6afb62ee6df81d3c5ad2`
+
+两个包的 ko 都是：
+
+```
+vermagic=6.6.144-4k-g6350e8af3f4c SMP preempt mod_unload modversions aarch64
+```
+
+> 更早的 `phdroid-hummer-42223499194` / `42228372442` 是旧打包脚本，
+> 没有 no_boot / 存活窗口 / crash_count，已被这两个 safety 包取代。
+
+### 安全兜底行为
+
+新包的 `service.sh` 增加了这些逻辑：
+
+| 机制 | 行为 |
+|---|---|
+| `no_boot` | **首次安装默认存在**，开机不自动加载 |
+| 手动 load | `PH_ACTION=load sh .../service.sh`，绕过 no_boot/blocked |
+| 存活窗口 | 自动加载后等 120 秒；期间没崩才写 `.boot_ok` |
+| 上次加载后崩 | `boot_pending` 还在、`.boot_ok` 不在 → 下次开机 `blocked` |
+| 崩溃计数 | `ro.boot.bootreason` 为 `watchdog` / `kernel_panic` / `panic` 时 +1；≥2 自动 `blocked` |
+| pstore | 每次开机把 `/sys/fs/pstore` 复制到 `.../phdroid/pstore/`，保留最近 3 份 |
+| build-id | 记录 release / kernel sha / config sha；OTA 后 release 不匹配直接拒绝加载 |
+
+常用命令：
+
+```sh
+# 状态
+su -c 'sh /data/adb/modules/phdroid/service.sh status'
+
+# 手动加载一次（首次安装后必须做）
+su -c 'PH_ACTION=load sh /data/adb/modules/phdroid/service.sh'
+
+# 清除 blocked / crash_count / boot_pending（确认要重新试时）
+su -c 'sh /data/adb/modules/phdroid/service.sh reset'
+
+# 验证稳定后，删掉 no_boot 才会开机自动加载
+su -c 'rm /data/adb/modules/phdroid/no_boot'
+```
+
+> 自动加载后的存活窗口默认 120 秒。**加载后 2 分钟内不要重启**，
+> 否则 `boot_pending` 还在、`.boot_ok` 没写，下次会被误判为“加载后崩溃”。
+> 可以把窗口改短：`echo 30 > /data/adb/modules/phdroid/alive_sec`。
+
+WebUI 的「加载」按钮已改成：
+
+```sh
+sh service.sh reset; PH_ACTION=load sh service.sh
+```
+
+所以安装后可以直接在 WebUI 里手动加载，不需要先删 `no_boot`。
 
 ---
 
@@ -144,19 +192,34 @@ GitHub → **Actions** → **Build hummer phDroid module (LineageOS 24 / 6.6.144
 
 1. 先卸载/停用旧版 `phDroid`，重启一次（避免两个模块同时加载）。
 2. KernelSU / KernelSU Next / SUKISU → 模块 → 安装 zip。
-3. 重启。
-4. 看日志：
+3. **重启**。首次安装会生成 `no_boot`，所以这次**不会自动加载**。
+4. 手动加载一次：
 
 ```sh
+su -c 'PH_ACTION=load sh /data/adb/modules/phdroid/service.sh'
+```
+
+   也可以在 WebUI 点「加载」；按钮已经改成 `reset + load`。
+
+5. 看日志：
+
+```sh
+su -c 'sh /data/adb/modules/phdroid/service.sh status'
 su -c 'cat /data/adb/modules/phdroid/phdroid.log'
 su -c 'grep -E "^droid_lkm" /proc/modules'
 su -c 'dmesg | grep -iE "droid_lkm|CFI failure|Unknown symbol" | tail -50'
 ```
 
-5. 启动一个容器，确认能进；再点**停止**，观察是否还关机。
+6. 启动一个容器，确认能进；再点**停止**、再**启动**，连续 3 次。
+7. 如果稳定，再删掉 `no_boot`，下次开机才会自动加载：
+
+```sh
+su -c 'rm /data/adb/modules/phdroid/no_boot'
+```
 
 > 第一次测试建议先装 **safe 包**：如果 safe 包不关机，再用正常包；
 > 这样能把问题范围缩到 `do_exit` / vendor 钩子。
+> 手动加载不会走 120 秒存活窗口，所以适合“先试一次”。
 
 ---
 
