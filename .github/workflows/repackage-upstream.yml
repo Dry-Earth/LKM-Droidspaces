@@ -1,0 +1,110 @@
+name: Repackage hummer phDroid upstream (safe)
+
+# 不重编内核，下载已有 upstream build 的 ko，按 safe_mode 重新打包。
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Build hummer phDroid (upstream) run ID'
+        required: true
+        type: string
+        default: '42240247134'
+      publish_release:
+        description: '发布 Release'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  KERNEL_SHA: 6350e8af3f4c452d087fbd6fe1aabe03cbc0af75
+  EXPECTED_RELEASE: 6.6.144-4k-g6350e8af3f4c
+  CLANG_REV: clang-r596125
+  KMI: android15-6.6
+
+jobs:
+  repackage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download ko artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: phdroid-upstream-${{ inputs.run_id }}
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: art
+
+      - name: Collect ko
+        run: |
+          set -eux
+          mkdir -p out/android15-6.6
+          cp art/out/android15-6.6/*.ko out/android15-6.6/
+          ls -lh out/android15-6.6
+          for k in out/android15-6.6/*.ko; do
+            printf '%s: ' "$k"
+            strings "$k" | grep -m1 'vermagic=' || true
+          done
+
+      - name: Patch package (safe)
+        env:
+          SAFE_MODE: "true"
+        run: bash ci/patch-package.sh
+
+      - name: Package
+        run: |
+          set -eux
+          command -v zip >/dev/null 2>&1 || { sudo apt-get update; sudo apt-get install -y zip; }
+          bash ci/package.sh
+          sha256sum dist/*.zip
+
+      - name: Build info
+        run: |
+          set -eux
+          {
+            echo "source run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${{ inputs.run_id }}"
+            echo "safe mode: true (modules=droid_lkm, no vendor)"
+            echo "release: ${EXPECTED_RELEASE}"
+            echo
+            cat module/build-id.txt
+            echo
+            find out -maxdepth 2 -name '*.ko' -exec sha256sum {} + | sort
+            echo
+            for k in out/*/*.ko; do printf '%s: ' "$k"; strings "$k" | grep -m1 'vermagic=' || true; done
+            echo
+            sha256sum dist/*.zip
+          } > build-info.txt
+          cat build-info.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phdroid-upstream-safe-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            dist/*.zip
+            out/*/*.ko
+            module/build-id.txt
+            module/module.prop
+            build-info.txt
+
+      - name: Publish release
+        if: ${{ inputs.publish_release }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eux
+          tag="phdroid-upstream-safe-${GITHUB_RUN_ID}"
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/*.zip build-info.txt -R "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" dist/*.zip build-info.txt \
+              -R "$GITHUB_REPOSITORY" \
+              --title "phDroid upstream safe for hummer (${GITHUB_RUN_ID})" \
+              --notes-file build-info.txt
+          fi
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" --json url -q .url
