@@ -1,7 +1,7 @@
 "use strict";
 const MOD = "/data/adb/modules/phdroid";
 const CMD_STATUS = `sh ${MOD}/service.sh status`;
-const CMD_RETRY = `rm -f ${MOD}/blocked ${MOD}/insmod.crash ${MOD}/insmod.inflight; sh ${MOD}/service.sh`;
+const CMD_RETRY = `sh ${MOD}/service.sh reset; PH_ACTION=load sh ${MOD}/service.sh`;
 const CMD_CLEAR_LOG = `: > ${MOD}/phdroid.log`;
 let seq = 0;
 let busy = false;
