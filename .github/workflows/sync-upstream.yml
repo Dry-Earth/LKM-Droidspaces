@@ -23,10 +23,14 @@ jobs:
           git push -f origin refs/tags/pre-sync-20261106
           git remote add upstream https://github.com/Dere3046/_patchHarmony.git
           git fetch upstream main
+          parent=$(git rev-parse origin/main)
           git reset --hard 9f656329d67ad5011770003b96b98a56c886d525
-          # GITHUB_TOKEN 不能修改/新增 workflow 文件；保留 fork 现有的
-          # .github/workflows（内容与当前 main 完全相同），并去掉上游新增的 native.yml
+          # 让新提交的 parent 是当前 main，这样 diff 里没有 workflow 变更；
+          # GITHUB_TOKEN 不允许创建/更新 workflow 文件。
+          git reset --soft "$parent"
           git checkout pre-sync-20261106 -- .github/workflows
           rm -f .github/workflows/native.yml
+          git add -A
+          git commit -m "sync upstream _patchHarmony 9f65632"
           git push -f origin HEAD:main
           echo "synced to $(git rev-parse HEAD)"
