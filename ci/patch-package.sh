@@ -28,6 +28,17 @@ conf_set nspid 1
 conf_set nspid_append 1
 conf_set verbose 0
 
+# 构建指纹：service.sh 用它拒绝 OTA 后内核不匹配的加载
+cfg_sha=$(sha256sum config/hummer_config.gz 2>/dev/null | awk '{print $1}')
+cat > module/build-id.txt <<EOF
+release=${EXPECTED_RELEASE:-6.6.144-4k-g6350e8af3f4c}
+kernel_sha=${KERNEL_SHA:-6350e8af3f4c452d087fbd6fe1aabe03cbc0af75}
+clang=${CLANG_REV:-clang-r596125}
+config_sha256=${cfg_sha}
+EOF
+echo "==> build-id"
+cat module/build-id.txt
+
 suffix=""
 if [ "$SAFE" = "true" ]; then
   # 安全模式：先不挂 do_exit kprobe，也不加载 OPPO vendor 模块。
