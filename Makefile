@@ -17,7 +17,7 @@ DEPS_OBJS_ALL := $(filter-out deps/HooKern/lib/hk_binder.o deps/HooKern/lib/hk_l
 
 # second ko in the same Kbuild: vendor compatibility fixups
 #   ghost task fallback for find_task_by_vpid
-#   oppo ddl history table
+#   oppo ddl history bounds
 # the vendor module supports 6.6 and 6.12 only; the main module is the one
 # being ported to the other branches
 VENDOR_VER := $(shell sed -n 's/.*UTS_RELEASE "\([0-9]*\.[0-9]*\).*/\1/p' \
@@ -115,6 +115,24 @@ MUNMAP_UNIT := $(shell if grep -qE ' [tT] do_vmi_munmap$$' $(KDIR)/System.map 2>
 	elif grep -qE ' [tT] do_mas_munmap$$' $(KDIR)/System.map 2>/dev/null; then echo src/main/ipcns/munmap_mas.o; \
 	else echo src/main/ipcns/munmap_legacy.o; fi)
 
+NATIVE_PID_OBJ :=
+ifeq ($(DROID_LKM_PID_BOTH),1)
+ccflags-y += -DDROID_LKM_NATIVE_PID -DDROID_LKM_PID_BOTH
+ccflags-y += -I$(src)/src/native -I$(src)/src/native/kernel
+ccflags-y += -I$(src)/src/native/compat
+NATIVE_PID_OBJ := src/native/kernel/pid_namespace.o \
+	src/native/compat/nsproxy.o src/native/compat/pid_namespace.o \
+	src/native/shim.o
+endif
+ifeq ($(DROID_LKM_NATIVE_PID),1)
+ccflags-y += -DDROID_LKM_NATIVE_PID
+ccflags-y += -I$(src)/src/native -I$(src)/src/native/kernel
+ccflags-y += -I$(src)/src/native/compat
+NATIVE_PID_OBJ := src/native/kernel/pid_namespace.o \
+	src/native/compat/nsproxy.o src/native/compat/pid_namespace.o \
+	src/native/shim.o
+endif
+
 droid_lkm-y := src/main/core/main.o src/main/core/ds_features.o \
 	src/hook/ds_hook.o src/compat/ds_compat.o \
 	src/compat/ds_layout_anchor.o \
@@ -127,6 +145,7 @@ droid_lkm-y := src/main/core/main.o src/main/core/ds_features.o \
 	src/main/pidns/ds_nsops.o \
 	src/main/pidns/ds_proc.o \
 	src/main/pidns/ds_status.o \
+	$(NATIVE_PID_OBJ) \
 	src/main/ipcns/ipcns.o \
 	src/main/ipcns/ksym_shim.o \
 	src/main/ipcns/ipc_shim.o \
@@ -179,12 +198,16 @@ ccflags-y += -DDROID_LKM_LAYOUT_TEST_BUILD_SHIFT=$(DROID_LKM_LAYOUT_TEST_BUILD_S
 endif
 ccflags-y += -DCONFIG_KERNSC_PATCH -DCONFIG_KERNSC_DISCOVER
 
+.PHONY: all clean module
 all:
 	@mkdir -p $(sort $(dir $(addprefix $(ODIR)/,$(droid_lkm-y) $(droid_lkm_vendor-y) $(droid_lkm_misc-y))))
 	# 6.18 kbuild derives src from srcroot, older kernels ignore it
 	make -C $(KDIR) M=$(ODIR) src=$(MDIR) srcroot=$(MDIR) modules
 clean:
 	make -C $(KDIR) M=$(ODIR) src=$(MDIR) srcroot=$(MDIR) clean
+
+module:
+	gradle -q packageModule
 
 $(obj)/%.o: $(src)/%.c $(recordmcount_source) FORCE
 	$(call if_changed_rule,cc_o_c)
