@@ -29,6 +29,7 @@ CRASH=$DATA/crash_count
 LASTBR=$DATA/last_bootreason
 PSTORE=$DATA/pstore
 BUILDID=$MODDIR/build-id.txt
+LAST=$DATA/last_result
 LOG_MAX=262144
 
 MODE=${1:-${PH_ACTION:-}}
@@ -157,7 +158,10 @@ safety_boot() {
 	fi
 	rm -f "$OK" 2>/dev/null
 
-	preflight || exit 1
+	if ! preflight; then
+		echo "fail: preflight" > "$LAST" 2>/dev/null
+		exit 1
+	fi
 
 	printf '%s\n' "$(conf modules)" > "$MARK"
 	sync
@@ -167,9 +171,11 @@ safety_boot() {
 	sync
 	if [ "$rc" -ne 0 ]; then
 		log "install failed rc=$rc"
+		echo "fail: rc=$rc" > "$LAST" 2>/dev/null
 		exit 1
 	fi
 	log "loaded $(conf modules)"
+	echo "ok: $(conf modules)" > "$LAST" 2>/dev/null
 
 	: > "$PEND" 2>/dev/null
 	SEC=120
@@ -188,7 +194,10 @@ safety_boot() {
 }
 
 main_load() {
-	preflight || exit 1
+	if ! preflight; then
+		echo "fail: preflight" > "$LAST" 2>/dev/null
+		exit 1
+	fi
 	if [ -f "$MARK" ]; then
 		log "insmod marker present; run reset first"
 		exit 1
@@ -200,6 +209,7 @@ main_load() {
 	rm -f "$MARK"
 	sync
 	[ "$rc" -eq 0 ] && log "manual load ok" || log "manual load failed rc=$rc"
+	[ "$rc" -eq 0 ] && echo "ok: manual" > "$LAST" 2>/dev/null || echo "fail: manual rc=$rc" > "$LAST" 2>/dev/null
 	return "$rc"
 }
 
@@ -207,7 +217,17 @@ case "$MODE" in
 status)
 	echo "version=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null)"
 	echo "kernel=$(uname -r)"
+	echo "kmi=$(conf kmi_override)"
+	echo "manager=$(if [ -d /data/adb/ksu ]; then echo KernelSU; elif [ -d /data/adb/ap ]; then echo APatch; elif [ -d /data/adb/magisk ]; then echo Magisk; else echo unknown; fi)"
+	echo "brand=$(getprop ro.product.brand 2>/dev/null)"
+	echo "model=$(getprop ro.product.model 2>/dev/null)"
+	echo "oplus=$(conf oplus 1)"
 	echo "loaded=$(loaded droid_lkm && echo 1 || echo 0)"
+	echo "compat=$(loaded droid_lkm_vendor && echo 1 || echo 0)"
+	case "$(conf modules)" in
+	*droid_lkm_vendor*) echo "compat_wanted=on" ;;
+	*) echo "compat_wanted=off" ;;
+	esac
 	echo "modules=$(conf modules)"
 	echo "auto=$([ -f "$AUTO" ] && echo 1 || echo 0)"
 	echo "blocked=$([ -f "$BLOCK" ] && echo 1 || echo 0)"
@@ -217,7 +237,15 @@ status)
 	echo "last_bootreason=$(cat "$LASTBR" 2>/dev/null)"
 	echo "pstore=$(ls -1d "$PSTORE"/* 2>/dev/null | wc -l | tr -d ' ')"
 	echo "build_release=$(sed -n 's/^release=//p' "$BUILDID" 2>/dev/null | head -n 1)"
-	echo "last=$(tail -n 1 "$LOG" 2>/dev/null)"
+	echo "last=$(cat "$LAST" 2>/dev/null)"
+	for p in /sys/module/droid_lkm/parameters/*; do
+		[ -f "$p" ] || continue
+		echo "param.${p##*/}=$(cat "$p" 2>/dev/null)"
+	done
+	for p in /sys/module/droid_lkm_vendor/parameters/*; do
+		[ -f "$p" ] || continue
+		echo "cparam.${p##*/}=$(cat "$p" 2>/dev/null)"
+	done
 	echo "---log---"
 	tail -n 30 "$LOG" 2>/dev/null
 	exit 0
