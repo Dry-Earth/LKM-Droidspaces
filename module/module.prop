@@ -1,6 +1,6 @@
 id=phdroid
-name=phDroid
-version=2.0.0
-versionCode=6
+name=phDroid hummer (LineageOS 24)
+version=v2.0.0-hummer
+versionCode=7
 author=Dere3046 XiYueSauce
-description=patchHarmony wrapper
+description=phDroid for OnePlus Ace 5 Pro (hummer) / LineageOS 24 / 6.6.144. Upstream 9f65632 (fix panic / fix pid cache), exact KDIR + stock clang r596125. 默认不自动加载；先手动 load 验证。
