@@ -14,6 +14,7 @@ fi
 cat > module/config.conf <<EOF
 modules=${modules}
 kmi_override=android15-6.6
+oplus=1
 EOF
 
 cfg_sha=$(sha256sum config/hummer_config.gz 2>/dev/null | awk '{print $1}')
