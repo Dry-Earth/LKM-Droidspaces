@@ -1,14 +1,23 @@
 #!/bin/bash
-# 在 DDK 容器里用“目标机器真实 config”编出与 stock 内核一致的 KDIR。
+# 在 DDK 容器里用“目标机器真实 config + 原厂 clang r596125”编出 KDIR。
 # KDIR = /work/kernel/out，后面编 LKM 时直接用它。
 set -euxo pipefail
 
-if [ "${USE_STOCK_CLANG:-0}" = "1" ] && [ -x /work/clang-stock/bin/clang ]; then
-  export PATH="/work/clang-stock/bin:$PATH"
-  echo "==> clang: stock $(clang --version | head -n1)"
-else
-  echo "==> clang: DDK $(clang --version | head -n1)"
+if [ "${USE_STOCK_CLANG:-0}" != "1" ]; then
+  echo "::error::必须设置 USE_STOCK_CLANG=1，拒绝用 DDK r510928 编 KDIR"
+  exit 1
 fi
+if [ ! -x /work/clang-stock/bin/clang ]; then
+  echo "::error::/work/clang-stock/bin/clang 不存在"
+  exit 1
+fi
+export PATH="/work/clang-stock/bin:$PATH"
+clang --version | head -n1
+clang --version | grep -q 'r596125' || {
+  echo "::error::当前 clang 不是原厂 r596125"
+  exit 1
+}
+echo "==> clang: stock r596125"
 
 export ARCH=arm64
 export LLVM=1
