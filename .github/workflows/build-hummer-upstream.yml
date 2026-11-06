@@ -1,0 +1,259 @@
+name: Build hummer phDroid (upstream 9f65632)
+
+# 基于 Dere3046/_patchHarmony 9f65632（fix panic / fix pid cache），
+# 用精确 6.6.144 KDIR + 原厂 clang r596125 编译 native PID 版本。
+#
+# 默认不自动加载；首次安装后手动 `sh service.sh load` 验证。
+
+on:
+  workflow_dispatch:
+    inputs:
+      safe_mode:
+        description: '安全模式：不加载 droid_lkm_vendor'
+        required: true
+        type: boolean
+        default: false
+      publish_release:
+        description: '构建成功后发布 Release'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  KERNEL_REPO: LineageOS/android_kernel_oneplus_sm8750
+  KERNEL_BRANCH: lineage-24.0
+  KERNEL_SHA: 6350e8af3f4c452d087fbd6fe1aabe03cbc0af75
+  MODULES_REPO: LineageOS/android_kernel_oneplus_sm8750-modules
+  MODULES_BRANCH: lineage-24.0
+  MODULES_SHA: e05c031ce1512477f2d5db7bfa26a859adfcfbc7
+  EXPECTED_RELEASE: 6.6.144-4k-g6350e8af3f4c
+  KMI: android15-6.6
+  CLANG_REV: clang-r596125
+  CLANG_SHA: 29182889399818f97baa65ea238c80e8117981eb
+  DDK_IMAGE: ghcr.io/ylarod/ddk-min:android15-6.6-20260313
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+
+    steps:
+      - name: Free disk space
+        run: |
+          set -eux
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h
+
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Clone kernel source at the exact SHA
+        run: |
+          set -eux
+          mkdir -p kernel
+          cd kernel
+          git init -q
+          git remote add origin "https://github.com/${KERNEL_REPO}.git"
+          if ! git fetch --depth 1 --no-tags origin "$KERNEL_SHA"; then
+            echo "::warning::fetch by SHA failed, falling back to a deeper branch fetch"
+            git fetch --no-tags --depth 200 origin "$KERNEL_BRANCH"
+          fi
+          git checkout -q "$KERNEL_SHA" 2>/dev/null || git checkout -q FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$KERNEL_SHA"
+
+      - name: Clone modules source (sibling of kernel) at the exact SHA
+        run: |
+          set -eux
+          mkdir -p sm8750-modules
+          cd sm8750-modules
+          git init -q
+          git remote add origin "https://github.com/${MODULES_REPO}.git"
+          if ! git fetch --depth 1 --no-tags origin "$MODULES_SHA"; then
+            echo "::warning::fetch by SHA failed, falling back to a deeper branch fetch"
+            git fetch --no-tags --depth 200 origin "$MODULES_BRANCH"
+          fi
+          git checkout -q "$MODULES_SHA" 2>/dev/null || git checkout -q FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$MODULES_SHA"
+
+      - name: Prepare workspace paths
+        run: |
+          set -eux
+          ln -sfn kernel sm8750
+          test -s config/hummer_config.gz
+
+      - name: Restore stock clang cache
+        id: clang-cache
+        uses: actions/cache@v4
+        with:
+          path: clang-stock
+          key: phdroid-upstream-clang-${{ env.CLANG_REV }}-${{ env.CLANG_SHA }}-v1
+
+      - name: Download stock clang r596125
+        run: |
+          set -eux
+          mkdir -p clang-stock
+          if [ -x clang-stock/bin/clang ]; then
+            echo "==> clang-stock exists"
+            exit 0
+          fi
+          base="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive"
+          urls="
+            ${base}/${CLANG_SHA}/${CLANG_REV}.tar.gz
+            ${base}/refs/heads/android17-release/${CLANG_REV}.tar.gz
+            ${base}/refs/heads/android17-qpr1-release/${CLANG_REV}.tar.gz
+            ${base}/refs/heads/android17-qpr2-release/${CLANG_REV}.tar.gz
+          "
+          ok=0
+          for u in $urls; do
+            echo "==> try $u"
+            if curl -fL --retry 2 --retry-all-errors --connect-timeout 20 -o /tmp/clang.tar.gz "$u"; then
+              rm -rf clang-stock
+              mkdir -p clang-stock
+              tar -xzf /tmp/clang.tar.gz -C clang-stock
+              ok=1
+              break
+            fi
+          done
+          test "$ok" = "1"
+          test -x clang-stock/bin/clang
+
+      - name: Verify stock clang
+        run: |
+          set -eux
+          clang-stock/bin/clang --version | head -n1
+          clang-stock/bin/clang --version | grep -q 'r596125'
+
+      - name: Save stock clang cache
+        if: ${{ steps.clang-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: clang-stock
+          key: phdroid-upstream-clang-${{ env.CLANG_REV }}-${{ env.CLANG_SHA }}-v1
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: phdroid-upstream-ccache-${{ env.KERNEL_SHA }}-${{ hashFiles('config/hummer_config.gz') }}-${{ env.CLANG_REV }}
+          restore-keys: |
+            phdroid-upstream-ccache-${{ env.KERNEL_SHA }}-
+
+      - name: Pull DDK toolchain
+        run: docker pull "$DDK_IMAGE"
+
+      - name: Build exact KDIR
+        env:
+          KERNELRELEASE: ${{ env.EXPECTED_RELEASE }}
+        run: |
+          set -eux
+          mkdir -p .ccache
+          docker run --rm \
+            -v "$PWD:/work" \
+            -v "$PWD/.ccache:/ccache" \
+            -w /work/kernel \
+            -e KERNELRELEASE \
+            -e USE_STOCK_CLANG=1 \
+            -e CCACHE_DIR=/ccache \
+            -e CCACHE_BASEDIR=/work/kernel \
+            -e CCACHE_COMPRESS=1 \
+            -e CCACHE_MAXSIZE=5G \
+            "$DDK_IMAGE" \
+            bash /work/ci/build-kdir.sh
+
+      - name: Build phDroid LKM (native PID)
+        env:
+          KERNELRELEASE: ${{ env.EXPECTED_RELEASE }}
+          KDIR: /work/kernel/out
+          VER: ${{ env.KMI }}
+          DROID_LKM_NATIVE_PID: "1"
+        run: |
+          set -eux
+          docker run --rm \
+            -v "$PWD:/work" \
+            -w /work \
+            -e KERNELRELEASE \
+            -e KDIR \
+            -e VER \
+            -e DROID_LKM_NATIVE_PID \
+            "$DDK_IMAGE" \
+            bash /work/ci/build-lkm.sh
+
+      - name: Patch package for hummer
+        env:
+          SAFE_MODE: ${{ inputs.safe_mode }}
+        run: bash ci/patch-package.sh
+
+      - name: Package KernelSU zip
+        run: |
+          set -eux
+          command -v zip >/dev/null 2>&1 || { sudo apt-get update; sudo apt-get install -y zip; }
+          bash ci/package.sh
+          ls -lh dist
+          sha256sum dist/*.zip
+
+      - name: Write build info
+        run: |
+          set -eux
+          {
+            echo "device:        OnePlus Ace 5 Pro (hummer)"
+            echo "rom:           LineageOS 24.0 (20261030)"
+            echo "kernel:        ${KERNEL_REPO} @ ${KERNEL_SHA}"
+            echo "modules:       ${MODULES_REPO} @ ${MODULES_SHA}"
+            echo "release:       ${EXPECTED_RELEASE}"
+            echo "KMI:           ${KMI}"
+            echo "config:        config/hummer_config.gz"
+            echo "clang:         $(clang-stock/bin/clang --version | head -n1)"
+            echo "native PID:    1"
+            echo "safe mode:     ${{ inputs.safe_mode }}"
+            echo
+            echo "build-id:"
+            cat module/build-id.txt
+            echo
+            echo "module sha256:"
+            find out -maxdepth 2 -name '*.ko' -exec sha256sum {} + | sort
+            echo
+            echo "vermagic:"
+            for k in out/*/*.ko; do printf '%s: ' "$k"; strings "$k" | grep -m1 'vermagic=' || true; done
+            echo
+            echo "zip sha256:"
+            sha256sum dist/*.zip
+          } > build-info.txt
+          cat build-info.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: phdroid-upstream-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            dist/*.zip
+            out/*/*.ko
+            module/build-id.txt
+            module/module.prop
+            build-info.txt
+
+      - name: Publish release
+        if: ${{ inputs.publish_release }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eux
+          tag="phdroid-upstream-${GITHUB_RUN_ID}"
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/*.zip build-info.txt -R "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" dist/*.zip build-info.txt \
+              -R "$GITHUB_REPOSITORY" \
+              --title "phDroid upstream 9f65632 for hummer (${GITHUB_RUN_ID})" \
+              --notes-file build-info.txt
+          fi
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" --json url -q .url
