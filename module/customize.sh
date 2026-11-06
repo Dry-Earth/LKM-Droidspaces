@@ -26,6 +26,7 @@ detect_kmi() {
 unpack_static() {
     unzip -o "$ZIPFILE" module.prop config.conf service.sh uninstall.sh build-id.txt \
         -d "$MODPATH" >&2 || abort "! unpack failed"
+    unzip -o "$ZIPFILE" "webroot/*" -d "$MODPATH" >&2 || abort "! unpack webui failed"
 }
 
 unpack_build() {
@@ -35,8 +36,9 @@ unpack_build() {
 }
 
 chmod_module() {
-    chmod 0755 "$MODPATH" "$MODPATH/bin" "$MODPATH"/*.sh
+    chmod 0755 "$MODPATH" "$MODPATH/bin" "$MODPATH"/webroot "$MODPATH"/*.sh
     chmod 0644 "$MODPATH"/module.prop "$MODPATH"/config.conf "$MODPATH"/build-id.txt
+    chmod 0644 "$MODPATH"/webroot/* 2>/dev/null
     find "$MODPATH"/bin -name '*.ko' -exec chmod 0644 {} \;
 }
 
