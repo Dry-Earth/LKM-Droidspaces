@@ -166,6 +166,7 @@ jobs:
             -v "$PWD/.ccache:/ccache" \
             -w /work/kernel \
             -e KERNELRELEASE \
+            -e USE_STOCK_CLANG=1 \
             -e CCACHE_DIR=/ccache \
             -e CCACHE_BASEDIR=/work/kernel \
             -e CCACHE_COMPRESS=1 \
