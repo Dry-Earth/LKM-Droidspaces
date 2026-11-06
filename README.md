@@ -43,9 +43,9 @@ PID / IPC / SYSVIPC / POSIX mqueue 能力，不刷内核、保持 Systemless。
 
 ### 正常包（启用 OPPO vendor 兼容）
 
-- Release：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-upstream-42240247134
+- Release：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-upstream-42248909106
 - zip：`phDroid-v2.0.0-hummer.zip`（3.0 MB）
-- sha256：`8e17b93f834d726c6b809ed846f0ad277019dc08338c7ffbc4c9ee28c9a35971`
+- sha256：`d386395d8f7b18d203f312daf7a81ea02aca40c9c061ff90dece61020d35a21d`
 - 模块：`droid_lkm` + `droid_lkm_vendor`
 - ko：
   - `droid_lkm.ko` sha256 `c9ae030797bec7bc69aaf83c0b1ebbb775c101029f8936df979cedc9fae01a57`
@@ -53,9 +53,9 @@ PID / IPC / SYSVIPC / POSIX mqueue 能力，不刷内核、保持 Systemless。
 
 ### 安全模式包（不加载 vendor）
 
-- Release：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-upstream-safe-42246001655
+- Release：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-upstream-safe-42249159170
 - zip：`phDroid-v2.0.0-hummer-safe.zip`
-- sha256：`1590e4ac3549d2615c2b9b47bba78da9a9560101d07ab4f068bf38cb7514d988`
+- sha256：`31061178f52a57400d676e5d48f21eb93b01069ea46f7639ade2153faed67ca8`
 - 模块：仅 `droid_lkm`
 
 两个包的 vermagic 都是：
@@ -64,7 +64,25 @@ PID / IPC / SYSVIPC / POSIX mqueue 能力，不刷内核、保持 Systemless。
 vermagic=6.6.144-4k-g6350e8af3f4c SMP preempt mod_unload modversions aarch64
 ```
 
-> 旧的 `phDroid-v1.0.4-hummer*.zip`（10 月 29 日源码）已被淘汰，不要再用。
+> 旧包 `phdroid-upstream-42240247134` / `phdroid-upstream-safe-42246001655`
+> 是上游打包修正版，但**没有 WebUI**；请使用上面的 `42248909106` / `42249159170`。
+
+### WebUI 已恢复
+
+上游 `9f65632` 的 `fix mod` 删掉了 `module/webroot` 和 `webui/`，
+所以最初同步后的包没有 WebUI。本 fork 已把旧 WebUI 恢复，并适配新 `service.sh`：
+
+- `webroot/index.html` + `webroot/main.js` 已放回模块；
+- `customize.sh` 会解包 `webroot/*`（因为 `SKIPUNZIP=1`）；
+- WebUI 按钮：
+  - **刷新** → `service.sh status`
+  - **重试加载** → `service.sh reset; PH_ACTION=load service.sh`
+  - **清空日志** → `/data/adb/phdroid/phdroid.log`
+- `service.sh status` 补回了 WebUI 需要的
+  `kmi` / `manager` / `brand` / `model` / `oplus` / `compat` /
+  `compat_wanted` / `param.*` / `cparam.*` / `last` 字段。
+
+> 注意：WebUI 仍需要 KernelSU/APatch 的 WebUI API；KSU LKM 模式支持。
 
 ---
 
