@@ -138,8 +138,11 @@ if [ -f "$MODPATH/kernels/$BEST/droid_lkm_vendor.ko" ]; then
 fi
 rm -rf "$MODPATH/kernels"
 
-# 不带旧版本的状态
-rm -f "$MODPATH/insmod.inflight" "$MODPATH/insmod.crash" "$MODPATH/blocked"
+# 安全默认：首次安装不自动加载；清空旧状态
+rm -f "$MODPATH/insmod.inflight" "$MODPATH/insmod.crash" "$MODPATH/blocked" \
+	"$MODPATH/crash_count" "$MODPATH/boot_pending" "$MODPATH/.boot_ok" \
+	"$MODPATH/last_bootreason" "$MODPATH/load.crash" 2>/dev/null
+: > "$MODPATH/no_boot"
 
 # 只补可执行位，不动 secontext
 chmod 0755 "$MODPATH"/*.sh "$MODPATH"/META-INF/com/google/android/update-binary 2>/dev/null
@@ -151,4 +154,5 @@ ui_print "- device : ${BRAND:-?} ${MODEL:-} (oplus=$OPLUS)"
 ui_print "- kernel : $RELEASE"
 ui_print "- kmi    : $BEST"
 ui_print "- compat : $(conf_get "$MODPATH/config.conf" compat)"
+ui_print "- safety : no_boot created; load once manually before enabling auto"
 ui_print "- config : \$MODDIR/config.conf"
