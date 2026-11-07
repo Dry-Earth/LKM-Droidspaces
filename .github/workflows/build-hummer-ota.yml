@@ -1,0 +1,304 @@
+name: Build hummer phDroid from OTA (auto manifest)
+
+# 输入任意 LineageOS OTA 的 boot.img + build-manifest.xml，
+# 自动解析 kernel/modules/devicetrees/clang 的精确 revision，
+# 从 boot.img 提取 config / release / clang，然后编译 phDroid 模块。
+#
+# 不写死 OTA：以后更新只需要换两个 URL。
+
+on:
+  workflow_dispatch:
+    inputs:
+      boot_img_url:
+        description: 'OTA boot.img URL'
+        required: true
+        type: string
+        default: 'https://mirrorbits.lineageos.org/full/hummer/20261106/boot.img'
+      manifest_url:
+        description: 'OTA build-manifest.xml URL'
+        required: true
+        type: string
+        default: 'https://mirrorbits.lineageos.org/full/hummer/20261106/build-manifest.xml'
+      safe_mode:
+        description: '安全模式：不加载 droid_lkm_vendor'
+        required: true
+        type: boolean
+        default: false
+      publish_release:
+        description: '构建成功后发布 Release'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  KERNEL_REPO: LineageOS/android_kernel_oneplus_sm8750
+  MODULES_REPO: LineageOS/android_kernel_oneplus_sm8750-modules
+  MAGISKBOOT_URL_CACHED: https://github.com/Dry-Earth/LKM-Droidspaces/releases/download/test-assets/libmagiskboot-x86_64.so
+  MAGISK_APK_URL: https://github.com/topjohnwu/Magisk/releases/download/v31.1/Magisk-v31.1.apk
+  DDK_IMAGE: ghcr.io/ylarod/ddk-min:android15-6.6-20260313
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+
+    steps:
+      - name: Free disk space
+        run: |
+          set -eux
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h
+
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Download and parse build-manifest.xml
+        run: |
+          set -eux
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -A "Mozilla/5.0" \
+            -o manifest.xml "${{ inputs.manifest_url }}"
+          python3 ci/parse-manifest.py manifest.xml | tee metadata.env
+          cat metadata.env >> "$GITHUB_ENV"
+
+      - name: Download boot.img and magiskboot
+        run: |
+          set -eux
+          mkdir -p bootwork
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -A "Mozilla/5.0" \
+            -o bootwork/stock-boot.img "${{ inputs.boot_img_url }}"
+          stat -c 'boot.img size=%s' bootwork/stock-boot.img
+          sha256sum bootwork/stock-boot.img | tee bootwork/boot.sha256
+
+          if curl -fL --retry 3 --retry-all-errors -o bootwork/magiskboot "$MAGISKBOOT_URL_CACHED"; then
+            chmod +x bootwork/magiskboot
+          else
+            curl -fL --retry 3 --retry-all-errors -o Magisk.apk "$MAGISK_APK_URL"
+            unzip -o Magisk.apk lib/x86_64/libmagiskboot.so -d magisk
+            install -m 755 magisk/lib/x86_64/libmagiskboot.so bootwork/magiskboot
+          fi
+          chmod +x bootwork/magiskboot
+
+      - name: Clone kernel and modules at manifest revisions
+        run: |
+          set -eux
+          for repo_sha in "kernel:${KERNEL_REPO}:${KERNEL_SHA}" "sm8750-modules:${MODULES_REPO}:${MODULES_SHA}"; do
+            dir=${repo_sha%%:*}
+            rest=${repo_sha#*:}
+            repo=${rest%%:*}
+            sha=${rest##*:}
+            mkdir -p "$dir"
+            cd "$dir"
+            git init -q
+            git remote add origin "https://github.com/${repo}.git"
+            if ! git fetch --depth 1 --no-tags origin "$sha"; then
+              git fetch --no-tags --depth 200 origin || true
+            fi
+            git checkout -q "$sha" 2>/dev/null || git checkout -q FETCH_HEAD
+            test "$(git rev-parse HEAD)" = "$sha"
+            cd ..
+          done
+          ln -sfn kernel sm8750
+
+      - name: Extract config / release / compiler from boot.img
+        run: |
+          set -eux
+          mkdir -p build-config
+          cd bootwork
+          ./magiskboot unpack stock-boot.img
+          ls -lh kernel
+
+          sh ../kernel/scripts/extract-ikconfig kernel > ../build-config/stock.config
+          test "$(grep -c '^CONFIG_' ../build-config/stock.config)" -gt 1000
+
+          rel=$(strings kernel | grep -m1 'Linux version ' | sed -n 's/.*Linux version \([^ ]*\).*/\1/p')
+          clang_raw=$(strings kernel | grep -m1 'based on r[0-9]' | sed -n 's/.*based on \(r[0-9]*\).*/\1/p')
+          test -n "$rel"
+          test -n "$clang_raw"
+          echo "EXPECTED_RELEASE=$rel" >> "$GITHUB_ENV"
+          echo "EXPECTED_CLANG=$clang_raw" >> "$GITHUB_ENV"
+          echo "CLANG_REV=clang-$clang_raw" >> "$GITHUB_ENV"
+
+          mm=$(printf '%s' "$rel" | sed -n 's/^\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+          case "$mm" in
+            6.6)  kmi=android15-6.6 ;;
+            6.12) kmi=android16-6.12 ;;
+            6.1)  kmi=android14-6.1 ;;
+            5.15) kmi=android14-5.15 ;;
+            5.10) kmi=android13-5.10 ;;
+            6.18) kmi=android17-6.18 ;;
+            *) echo "::error::unsupported kernel $rel"; exit 1 ;;
+          esac
+          echo "KMI=$kmi" >> "$GITHUB_ENV"
+          echo "release=$rel clang=$clang_raw kmi=$kmi"
+
+      - name: Restore clang cache
+        id: clang-cache
+        uses: actions/cache@v4
+        with:
+          path: clang-stock
+          key: ota-clang-${{ hashFiles('metadata.env') }}
+
+      - name: Download matching stock clang
+        run: |
+          set -eux
+          mkdir -p clang-stock
+          if [ -x clang-stock/bin/clang ]; then
+            echo "==> clang cache hit"
+            exit 0
+          fi
+          base="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive"
+          urls="
+            ${base}/${CLANG_PROJECT_SHA}/${CLANG_REV}.tar.gz
+            ${base}/refs/heads/android17-release/${CLANG_REV}.tar.gz
+            ${base}/refs/heads/android17-qpr1-release/${CLANG_REV}.tar.gz
+            ${base}/refs/heads/android17-qpr2-release/${CLANG_REV}.tar.gz
+          "
+          ok=0
+          for u in $urls; do
+            echo "==> try $u"
+            if curl -fL --retry 2 --retry-all-errors --connect-timeout 20 -o /tmp/clang.tar.gz "$u"; then
+              rm -rf clang-stock
+              mkdir -p clang-stock
+              tar -xzf /tmp/clang.tar.gz -C clang-stock
+              ok=1
+              break
+            fi
+          done
+          test "$ok" = "1"
+          test -x clang-stock/bin/clang
+          clang-stock/bin/clang --version | grep -q "$EXPECTED_CLANG"
+
+      - name: Save clang cache
+        if: ${{ steps.clang-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: clang-stock
+          key: ota-clang-${{ hashFiles('metadata.env') }}
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ota-ccache-${{ hashFiles('metadata.env', 'build-config/stock.config') }}
+          restore-keys: |
+            ota-ccache-
+
+      - name: Pull DDK toolchain
+        run: docker pull "$DDK_IMAGE"
+
+      - name: Build exact KDIR
+        run: |
+          set -eux
+          mkdir -p .ccache
+          docker run --rm \
+            -v "$PWD:/work" \
+            -v "$PWD/.ccache:/ccache" \
+            -w /work/kernel \
+            -e KERNELRELEASE="$EXPECTED_RELEASE" \
+            -e USE_STOCK_CLANG=1 \
+            -e EXPECTED_CLANG \
+            -e CCACHE_DIR=/ccache \
+            -e CCACHE_BASEDIR=/work/kernel \
+            -e CCACHE_COMPRESS=1 \
+            -e CCACHE_MAXSIZE=5G \
+            "$DDK_IMAGE" \
+            bash /work/ci/build-kdir.sh
+
+      - name: Build phDroid LKM (native PID)
+        run: |
+          set -eux
+          docker run --rm \
+            -v "$PWD:/work" \
+            -w /work \
+            -e KERNELRELEASE="$EXPECTED_RELEASE" \
+            -e KDIR=/work/kernel/out \
+            -e VER="$KMI" \
+            -e EXPECTED_CLANG \
+            -e DROID_LKM_NATIVE_PID=1 \
+            "$DDK_IMAGE" \
+            bash /work/ci/build-lkm.sh
+
+      - name: Patch package for hummer
+        env:
+          SAFE_MODE: ${{ inputs.safe_mode }}
+          CONFIG_PATH: build-config/stock.config
+        run: bash ci/patch-package.sh
+
+      - name: Package KernelSU zip
+        run: |
+          set -eux
+          command -v zip >/dev/null 2>&1 || { sudo apt-get update; sudo apt-get install -y zip; }
+          bash ci/package.sh
+          ls -lh dist
+          sha256sum dist/*.zip
+
+      - name: Write build info
+        run: |
+          set -eux
+          {
+            echo "device:        OnePlus Ace 5 Pro (hummer)"
+            echo "manifest:      ${{ inputs.manifest_url }}"
+            echo "boot img:      ${{ inputs.boot_img_url }}"
+            echo "boot sha256:   $(awk '{print $1}' bootwork/boot.sha256)"
+            echo "kernel:        ${KERNEL_REPO} @ ${KERNEL_SHA}"
+            echo "modules:       ${MODULES_REPO} @ ${MODULES_SHA}"
+            echo "devicetrees:   ${DEVICETREES_SHA:-}"
+            echo "clang project: ${CLANG_PROJECT_SHA:-}"
+            echo "release:       ${EXPECTED_RELEASE}"
+            echo "clang:         $(clang-stock/bin/clang --version | head -n1)"
+            echo "KMI:           ${KMI}"
+            echo "native PID:    1"
+            echo "safe mode:     ${{ inputs.safe_mode }}"
+            echo
+            echo "build-id:"
+            cat module/build-id.txt
+            echo
+            echo "module sha256:"
+            find out -maxdepth 2 -name '*.ko' -exec sha256sum {} + | sort
+            echo
+            echo "vermagic:"
+            for k in out/*/*.ko; do printf '%s: ' "$k"; strings "$k" | grep -m1 'vermagic=' || true; done
+            echo
+            echo "zip sha256:"
+            sha256sum dist/*.zip
+          } > build-info.txt
+          cat build-info.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: phdroid-ota-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            dist/*.zip
+            out/*/*.ko
+            module/build-id.txt
+            module/module.prop
+            build-config/stock.config
+            build-info.txt
+
+      - name: Publish release
+        if: ${{ inputs.publish_release }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eux
+          tag="phdroid-ota-${GITHUB_RUN_ID}"
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/*.zip build-info.txt -R "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" dist/*.zip build-info.txt \
+              -R "$GITHUB_REPOSITORY" \
+              --title "phDroid OTA ${EXPECTED_RELEASE} (${GITHUB_RUN_ID})" \
+              --notes-file build-info.txt
+          fi
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" --json url -q .url
