@@ -13,11 +13,12 @@ if [ ! -x /work/clang-stock/bin/clang ]; then
 fi
 export PATH="/work/clang-stock/bin:$PATH"
 clang --version | head -n1
-clang --version | grep -q 'r596125' || {
-  echo "::error::当前 clang 不是原厂 r596125"
+EXPECTED_CLANG=${EXPECTED_CLANG:-r596125}
+clang --version | grep -q "$EXPECTED_CLANG" || {
+  echo "::error::clang does not match expected $EXPECTED_CLANG"
   exit 1
 }
-echo "==> clang: stock r596125"
+echo "==> clang: stock $EXPECTED_CLANG"
 
 export ARCH=arm64
 export LLVM=1
@@ -35,11 +36,16 @@ fi
 cd /work/kernel
 mkdir -p out
 
-if [ ! -s /work/config/hummer_config.gz ]; then
-  echo "::error::/work/config/hummer_config.gz 不存在"
+if [ -s /work/build-config/stock.config ]; then
+  echo "==> baseline config: extracted from boot.img"
+  cp /work/build-config/stock.config out/.config
+elif [ -s /work/config/hummer_config.gz ]; then
+  echo "==> baseline config: /work/config/hummer_config.gz"
+  zcat /work/config/hummer_config.gz > out/.config
+else
+  echo "::error::no config (build-config/stock.config or config/hummer_config.gz)"
   exit 1
 fi
-zcat /work/config/hummer_config.gz > out/.config
 echo "==> baseline config: $(grep -c '^CONFIG_' out/.config) lines"
 
 make O=out olddefconfig
