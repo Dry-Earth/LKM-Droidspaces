@@ -41,22 +41,24 @@ PID / IPC / SYSVIPC / POSIX mqueue 能力，不刷内核、保持 Systemless。
 
 ## 产物
 
-### 正常包（启用 OPPO vendor 兼容）
+### 20261106 OTA 包（最新，带 WebUI）
 
-- Release：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-upstream-42248909106
-- zip：`phDroid-v2.0.0-hummer.zip`（3.0 MB）
-- sha256：`d386395d8f7b18d203f312daf7a81ea02aca40c9c061ff90dece61020d35a21d`
-- 模块：`droid_lkm` + `droid_lkm_vendor`
-- ko：
-  - `droid_lkm.ko` sha256 `c9ae030797bec7bc69aaf83c0b1ebbb775c101029f8936df979cedc9fae01a57`
-  - `droid_lkm_vendor.ko` sha256 `26e1bc8f1b1a28e77dbfe76870cc21709185bf3c1266b8a3f387744b1b557d6b`
+- Release：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-ota-42368940611
+- zip：`phDroid-v2.0.0-hummer.zip`
+- sha256：`853ab0a96fb01895cca6104b1950ed5a70d25118de406695fa8cb6791e009286`
+- 这版由 OTA 工作流自动解析 `20261106` 的 manifest 和 boot.img 生成
+- 20261106 的 boot sha256：`0af12a32e476b40752da27344f05198161cd84de977d8f4c58bc649809904456`
 
-### 安全模式包（不加载 vendor）
+> 解析结果：20261106 仍然是
+> kernel `6350e8af...` / modules `e05c031c...` / release `6.6.144-4k-g6350e8af3f4c`
+> / clang `r596125`，和 20261030 相同，所以之前的模块也兼容。
 
-- Release：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-upstream-safe-42249159170
-- zip：`phDroid-v2.0.0-hummer-safe.zip`
-- sha256：`31061178f52a57400d676e5d48f21eb93b01069ea46f7639ade2153faed67ca8`
-- 模块：仅 `droid_lkm`
+### 20261030 包（带 WebUI）
+
+- 正常包：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-upstream-42248909106
+  - sha256 `d386395d8f7b18d203f312daf7a81ea02aca40c9c061ff90dece61020d35a21d`
+- 安全包：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-upstream-safe-42249159170
+  - sha256 `31061178f52a57400d676e5d48f21eb93b01069ea46f7639ade2153faed67ca8`
 
 两个包的 vermagic 都是：
 
@@ -65,7 +67,7 @@ vermagic=6.6.144-4k-g6350e8af3f4c SMP preempt mod_unload modversions aarch64
 ```
 
 > 旧包 `phdroid-upstream-42240247134` / `phdroid-upstream-safe-42246001655`
-> 是上游打包修正版，但**没有 WebUI**；请使用上面的 `42248909106` / `42249159170`。
+> 是上游打包修正版，但**没有 WebUI**；请使用带 WebUI 的版本。
 
 ### WebUI 已恢复
 
@@ -177,6 +179,8 @@ su -c 'cat /data/adb/phdroid/phdroid.log'
 
 ## 构建
 
+### 固定当前版本
+
 `.github/workflows/build-hummer-upstream.yml`：
 
 1. 检出精确内核 commit `6350e8af...`；
@@ -184,8 +188,82 @@ su -c 'cat /data/adb/phdroid/phdroid.log'
 3. 用原厂 clang r596125 编译上游 9f65632 的 `droid_lkm`（native PID）；
 4. 打包 `module/` + `bin/android15-6.6`。
 
+### OTA 自动构建（推荐以后用）
+
+`.github/workflows/build-hummer-ota.yml` 只需要两个输入：
+
+- `boot_img_url`：OTA 的 `boot.img`
+- `manifest_url`：OTA 的 `build-manifest.xml`
+
+流程：
+
+1. 下载 manifest，用 `ci/parse-manifest.py` 解析
+   kernel / modules / devicetrees / clang prebuilt 的精确 revision；
+2. 下载 `boot.img`，`magiskboot unpack`；
+3. 从 Image 提取：
+   - `.config`（`extract-ikconfig`）
+   - `Linux version ...` → `KERNELRELEASE`
+   - `based on rXXXXX` → 原厂 clang 版本
+4. 按 kernel `major.minor` 自动选 KMI（6.6 → `android15-6.6`）；
+5. 从 manifest 的 clang prebuilt revision 下载对应 clang；
+6. 编 KDIR、编 native PID、打包（normal/safe）。
+
+20261106 已实测：manifest 解析结果仍是
+`6350e8af` / `e05c031c` / `6.6.144` / `r596125`，
+所以模块和上一版兼容；boot.img sha 变成 `0af12a32...`。
+
+### 重新打包
+
 `.github/workflows/repackage-upstream.yml`：
-不重编内核，下载已有 ko 后按 safe/normal 重新打包。
+不重编内核，下载已有 ko 后按 normal/safe 重新打包。
+
+---
+
+## USER_NS 和可选功能
+
+### USER_NS：不建议开
+
+- Droidspaces 跑 rootful 容器**不需要** `CONFIG_USER_NS`；
+- 原厂 6.6 内核没开，LKM 只能“伪造”，不是真的 uid 隔离；
+- 上游作者也把 `misc`（devtmpfs + userns）称为“软脚”；
+- 伪造 userns 要在 cred / RCU / fork 路径做 hook，正是最容易导致整机重启的部分。
+
+结论：**保持关闭**。如果确实要 rootless / 真正 uid 隔离，唯一安全路线是
+原生内核 `CONFIG_USER_NS=y` + 全量重编 vendor 模块，不是 LKM。
+
+### 当前已支持 / 未支持
+
+| 能力 | 状态 |
+|---|---|
+| PID / IPC / SYSVIPC / POSIX mqueue | ✅ `droid_lkm`（native PID） |
+| OPPO vendor 兼容 | ⚙️ `droid_lkm_vendor`，safe 包可关 |
+| devtmpfs / 硬件 `/dev` | ❌ 未构建（`misc` 被上游注释，作者称“软脚”） |
+| USER_NS | ❌ 不支持，不建议伪造 |
+| pids / cfs / memory 限制 | ❌ 当前 LKM 没有，需原生内核 |
+| macvlan / IPv6 NAT | ❌ 当前上游没有，旧 fork 的 6.12 模块需移植 |
+| overlayfs / seccomp / netns / cgroups | ✅ 原厂内核已开 |
+
+> 主模块没有更多“子开关”需要打开；`pid_impl=native` 是默认值，
+> `nsproxy=0` 也保持默认，不要为了“更多功能”去改这些高风险参数。
+
+### WebUI 开关建议
+
+已经可用且安全的开关：
+
+- **自动加载**（`/data/adb/phdroid/auto`）
+- **vendor 兼容**（`modules` 里是否包含 `droid_lkm_vendor`）
+- **重试加载 / reset / 清空日志**
+
+不建议做成“一键开启”的：
+
+- **硬件完全访问**（devtmpfs + 全量 `/dev`）：容器 root = 宿主 root，
+  能碰块设备；如果一定要，应该单独构建 `misc` 作为可选 KO，
+  默认关闭、手动加载、每次加载前警告，绝不能自动加载。
+- **USER_NS**：不要提供开关，避免用户误以为有隔离。
+- **网络隔离**：需要单独移植 macvlan/ip6nat 并验证 6.6，默认关闭。
+
+更安全的做法是：**LKM 只做命名空间/IPC 这一层**；
+硬件访问、cgroup 限制、网络隔离走原生 boot.img，而不是继续给 LKM 加高风险钩子。
 
 ---
 
