@@ -5,8 +5,9 @@ set -euxo pipefail
 
 export PATH="/work/clang-stock/bin:$PATH"
 clang --version | head -n1
-clang --version | grep -q 'r596125' || {
-  echo "::error::不是原厂 clang r596125"
+EXPECTED_CLANG=${EXPECTED_CLANG:-r596125}
+clang --version | grep -q "$EXPECTED_CLANG" || {
+  echo "::error::clang does not match expected $EXPECTED_CLANG"
   exit 1
 }
 
