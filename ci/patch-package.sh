@@ -17,10 +17,12 @@ kmi_override=android15-6.6
 oplus=1
 EOF
 
-cfg_sha=$(sha256sum config/hummer_config.gz 2>/dev/null | awk '{print $1}')
+cfg=${CONFIG_PATH:-config/hummer_config.gz}
+cfg_sha=$(sha256sum "$cfg" 2>/dev/null | awk '{print $1}')
 cat > module/build-id.txt <<EOF
 release=${EXPECTED_RELEASE:-6.6.144-4k-g6350e8af3f4c}
 kernel_sha=${KERNEL_SHA:-6350e8af3f4c452d087fbd6fe1aabe03cbc0af75}
+modules_sha=${MODULES_SHA:-}
 clang=${CLANG_REV:-clang-r596125}
 config_sha256=${cfg_sha}
 EOF
