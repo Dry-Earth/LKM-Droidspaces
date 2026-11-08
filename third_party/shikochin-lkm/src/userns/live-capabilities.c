@@ -220,7 +220,7 @@ static int get_file_caps(struct linux_binprm *bprm, const struct file *file,
 	if (!current_in_userns(file->f_path.mnt->mnt_sb->s_user_ns))
 		return 0;
 
-	rc = ds_userns_get_vfs_caps_from_disk(file_mnt_idmap(file),
+	rc = ds_userns_get_vfs_caps_from_disk(file_mnt_idmap((struct file *)file),
 				    file->f_path.dentry, &vcaps);
 	if (rc < 0) {
 		if (rc == -EINVAL)
