@@ -210,16 +210,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: clang-stock
-          key: shikochin-hummer-clang-${{ inputs.use_ota }}-${{ hashFiles('metadata.env', 'config/hummer_config.gz') }}
+          key: phdroid-hummer-clang-${{ env.CLANG_REV }}-${{ env.CLANG_SHA }}-v1
 
       - name: Download stock clang
         run: |
           set -eux
-          mkdir -p clang-stock
-          if [ -x clang-stock/bin/clang ]; then
+          if [ -x clang-stock/bin/clang ] &&
+             clang-stock/bin/clang --version | grep -q "$EXPECTED_CLANG"; then
             echo "==> clang cache hit"
             exit 0
           fi
+          rm -rf clang-stock
+          mkdir -p clang-stock
           base="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive"
           urls="
             ${CLANG_SHA:+${base}/${CLANG_SHA}/${CLANG_REV}.tar.gz}
@@ -228,15 +230,21 @@ jobs:
             ${base}/refs/heads/android17-qpr2-release/${CLANG_REV}.tar.gz
           "
           ok=0
-          for u in $urls; do
-            echo "==> try $u"
-            if curl -fL --retry 2 --retry-all-errors --connect-timeout 20 -o /tmp/clang.tar.gz "$u"; then
-              rm -rf clang-stock
+          # The googlesource archive endpoint occasionally closes mid-transfer;
+          # only accept the tarball after a successful extraction.
+          for attempt in 1 2 3; do
+            for u in $urls; do
+              echo "==> try $u (attempt $attempt)"
+              rm -rf clang-stock /tmp/clang.tar.gz
               mkdir -p clang-stock
-              tar -xzf /tmp/clang.tar.gz -C clang-stock
-              ok=1
-              break
-            fi
+              if curl -fL --retry 5 --retry-all-errors --retry-delay 2 \
+                   --connect-timeout 20 -o /tmp/clang.tar.gz "$u" &&
+                 tar -xzf /tmp/clang.tar.gz -C clang-stock; then
+                ok=1
+                break 2
+              fi
+              echo "==> archive incomplete, retrying"
+            done
           done
           test "$ok" = "1"
           test -x clang-stock/bin/clang
@@ -247,7 +255,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: clang-stock
-          key: shikochin-hummer-clang-${{ inputs.use_ota }}-${{ hashFiles('metadata.env', 'config/hummer_config.gz') }}
+          key: phdroid-hummer-clang-${{ env.CLANG_REV }}-${{ env.CLANG_SHA }}-v1
 
       - name: Restore ccache
         uses: actions/cache@v4
