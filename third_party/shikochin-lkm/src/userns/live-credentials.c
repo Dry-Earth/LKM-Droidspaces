@@ -10,6 +10,16 @@
 #include <linux/keyctl.h>
 extern struct kmem_cache *cred_jar;
 extern int install_thread_keyring_to_cred(struct cred *cred);
+
+/* 6.6 has no get_cred_many(); two get_cred() calls are equivalent here. */
+static inline const struct cred *ds_get_cred_many(const struct cred *cred, int n)
+{
+	int i;
+
+	for (i = 0; i < n; i++)
+		get_cred(cred);
+	return cred;
+}
 int copy_creds(struct task_struct *p, unsigned long clone_flags)
 {
 	struct cred *new;
@@ -25,7 +35,7 @@ int copy_creds(struct task_struct *p, unsigned long clone_flags)
 #endif
 		clone_flags & CLONE_THREAD
 	    ) {
-		p->real_cred = get_cred_many(p->cred, 2);
+		p->real_cred = ds_get_cred_many(p->cred, 2);
 		inc_rlimit_ucounts(task_ucounts(p), UCOUNT_RLIMIT_NPROC, 1);
 		return 0;
 	}
