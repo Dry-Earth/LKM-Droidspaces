@@ -117,6 +117,34 @@ jobs:
           python3 ci/parse-manifest.py manifest.xml | tee metadata.env
           cat metadata.env >> "$GITHUB_ENV"
 
+      - name: Clone kernel source at the exact SHA
+        run: |
+          set -eux
+          mkdir -p kernel
+          cd kernel
+          git init -q
+          git remote add origin "https://github.com/${KERNEL_REPO}.git"
+          if ! git fetch --depth 1 --no-tags origin "$KERNEL_SHA"; then
+            echo "::warning::fetch by SHA failed, falling back to a deeper branch fetch"
+            git fetch --no-tags --depth 200 origin "$KERNEL_BRANCH" || git fetch --no-tags --depth 200 origin
+          fi
+          git checkout -q "$KERNEL_SHA" 2>/dev/null || git checkout -q FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$KERNEL_SHA"
+
+      - name: Clone modules source (sibling of kernel) at the exact SHA
+        run: |
+          set -eux
+          mkdir -p sm8750-modules
+          cd sm8750-modules
+          git init -q
+          git remote add origin "https://github.com/${MODULES_REPO}.git"
+          if ! git fetch --depth 1 --no-tags origin "$MODULES_SHA"; then
+            echo "::warning::fetch by SHA failed, falling back to a deeper branch fetch"
+            git fetch --no-tags --depth 200 origin "$MODULES_BRANCH" || git fetch --no-tags --depth 200 origin
+          fi
+          git checkout -q "$MODULES_SHA" 2>/dev/null || git checkout -q FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$MODULES_SHA"
+
       - name: Download OTA boot.img and extract config / release / clang
         if: ${{ inputs.use_ota }}
         run: |
@@ -169,34 +197,6 @@ jobs:
             echo "CONFIG_PATH=build-config/stock.config"
           } >> "$GITHUB_ENV"
           echo "mode=ota release=$rel clang=$clang_raw kmi=$kmi"
-
-      - name: Clone kernel source at the exact SHA
-        run: |
-          set -eux
-          mkdir -p kernel
-          cd kernel
-          git init -q
-          git remote add origin "https://github.com/${KERNEL_REPO}.git"
-          if ! git fetch --depth 1 --no-tags origin "$KERNEL_SHA"; then
-            echo "::warning::fetch by SHA failed, falling back to a deeper branch fetch"
-            git fetch --no-tags --depth 200 origin "$KERNEL_BRANCH" || git fetch --no-tags --depth 200 origin
-          fi
-          git checkout -q "$KERNEL_SHA" 2>/dev/null || git checkout -q FETCH_HEAD
-          test "$(git rev-parse HEAD)" = "$KERNEL_SHA"
-
-      - name: Clone modules source (sibling of kernel) at the exact SHA
-        run: |
-          set -eux
-          mkdir -p sm8750-modules
-          cd sm8750-modules
-          git init -q
-          git remote add origin "https://github.com/${MODULES_REPO}.git"
-          if ! git fetch --depth 1 --no-tags origin "$MODULES_SHA"; then
-            echo "::warning::fetch by SHA failed, falling back to a deeper branch fetch"
-            git fetch --no-tags --depth 200 origin "$MODULES_BRANCH" || git fetch --no-tags --depth 200 origin
-          fi
-          git checkout -q "$MODULES_SHA" 2>/dev/null || git checkout -q FETCH_HEAD
-          test "$(git rev-parse HEAD)" = "$MODULES_SHA"
 
       - name: Prepare workspace paths
         run: |
