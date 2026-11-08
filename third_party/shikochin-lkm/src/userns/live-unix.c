@@ -171,9 +171,11 @@ int ds_userns_unix_dgram_recvmsg(struct sock *sk, struct msghdr *msg, size_t siz
 	if (msg->msg_name) {
 		unix_copy_addr(msg, skb->sk);
 
+#ifndef DS_USERNS_66
 		BPF_CGROUP_RUN_PROG_UNIX_RECVMSG_LOCK(sk,
 						      msg->msg_name,
 						      &msg->msg_namelen);
+#endif
 	}
 
 	if (size > skb->len - skip)
@@ -516,8 +518,10 @@ unlock:
 			DECLARE_SOCKADDR(struct sockaddr_un *, sunaddr, msg->msg_name);
 
 			unix_copy_addr(msg, skb->sk);
+#ifndef DS_USERNS_66
 			BPF_CGROUP_RUN_PROG_UNIX_RECVMSG_LOCK(sk, msg->msg_name,
 							      &msg->msg_namelen);
+#endif
 
 			sunaddr = NULL;
 		}
