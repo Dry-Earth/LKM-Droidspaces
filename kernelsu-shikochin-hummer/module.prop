@@ -1,0 +1,6 @@
+id=droidspaces_hummer
+name=Droidspaces LKM hummer (6.6)
+version=v0.1.0-hummer
+versionCode=1
+author=Dry-Earth / Shikochin
+description=[待加载] Shikochin Droidspaces-LKM port for OnePlus Ace 5 Pro / LineageOS 24 / 6.6.144. PID/IPC/SYSVIPC/mqueue + devtmpfs. 默认不自动加载。

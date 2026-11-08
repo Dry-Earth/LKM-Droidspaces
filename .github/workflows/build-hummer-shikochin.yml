@@ -1,0 +1,382 @@
+name: Build hummer Droidspaces-LKM (Shikochin port / OTA)
+
+# 把 third_party/shikochin-lkm 的 PID/IPC namespace 移植编译到
+# OnePlus Ace 5 Pro (hummer)。
+#
+# 两种模式：
+#   use_ota=true（默认）：填 OTA 的 boot.img + build-manifest.xml，
+#     自动解析 kernel/modules/clang revision，并从 boot.img 提取
+#     config / release / clang，和 build-hummer-ota.yml 一致。
+#   use_ota=false：使用仓库里固定的 6.6.144 SHA / config / clang。
+#
+# 模块 ID 是 droidspaces_hummer，不能和 phDroid 同时启用。
+
+on:
+  workflow_dispatch:
+    inputs:
+      use_ota:
+        description: '从 OTA boot.img + build-manifest.xml 自动解析（关闭则用仓库固定 SHA）'
+        required: true
+        type: boolean
+        default: true
+      boot_img_url:
+        description: 'OTA boot.img URL（use_ota=true 时使用）'
+        required: false
+        type: string
+        default: 'https://mirrorbits.lineageos.org/full/hummer/20261106/boot.img'
+      manifest_url:
+        description: 'OTA build-manifest.xml URL（use_ota=true 时使用）'
+        required: false
+        type: string
+        default: 'https://mirrorbits.lineageos.org/full/hummer/20261106/build-manifest.xml'
+      publish_release:
+        description: '构建成功后发布 Release'
+        required: true
+        type: boolean
+        default: true
+      build_devtmpfs:
+        description: '构建 devtmpfs（容器 /dev 设备节点）'
+        required: true
+        type: boolean
+        default: true
+      build_netfilter:
+        description: '尝试构建 netfilter（上游为 6.12 快照，6.6 大概率失败）'
+        required: true
+        type: boolean
+        default: false
+      build_userns:
+        description: '尝试构建 USER_NS 变体（上游为 6.12 实现，6.6 大概率失败）'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  KERNEL_REPO: LineageOS/android_kernel_oneplus_sm8750
+  KERNEL_BRANCH: lineage-24.0
+  KERNEL_SHA: 6350e8af3f4c452d087fbd6fe1aabe03cbc0af75
+  MODULES_REPO: LineageOS/android_kernel_oneplus_sm8750-modules
+  MODULES_BRANCH: lineage-24.0
+  MODULES_SHA: e05c031ce1512477f2d5db7bfa26a859adfcfbc7
+  EXPECTED_RELEASE: 6.6.144-4k-g6350e8af3f4c
+  KMI: android15-6.6
+  MODULE_VERSION: v0.1.0-hummer
+
+  MAGISKBOOT_URL_CACHED: https://github.com/Dry-Earth/LKM-Droidspaces/releases/download/test-assets/libmagiskboot-x86_64.so
+  MAGISK_APK_URL: https://github.com/topjohnwu/Magisk/releases/download/v31.1/Magisk-v31.1.apk
+
+  CLANG_REV: clang-r596125
+  CLANG_SHA: 29182889399818f97baa65ea238c80e8117981eb
+  DDK_IMAGE: ghcr.io/ylarod/ddk-min:android15-6.6-20260313
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+
+    steps:
+      - name: Free disk space
+        run: |
+          set -eux
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h
+
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Resolve pinned kernel inputs
+        if: ${{ !inputs.use_ota }}
+        run: |
+          set -eux
+          {
+            echo "KERNEL_SHA=$KERNEL_SHA"
+            echo "MODULES_SHA=$MODULES_SHA"
+            echo "EXPECTED_RELEASE=$EXPECTED_RELEASE"
+            echo "EXPECTED_CLANG=r596125"
+            echo "CLANG_REV=$CLANG_REV"
+            echo "CLANG_SHA=$CLANG_SHA"
+            echo "KMI=$KMI"
+            echo "CONFIG_PATH=config/hummer_config.gz"
+          } >> "$GITHUB_ENV"
+          echo "mode=pinned release=$EXPECTED_RELEASE"
+
+      - name: Download and parse OTA build-manifest.xml
+        if: ${{ inputs.use_ota }}
+        run: |
+          set -eux
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -A "Mozilla/5.0" \
+            -o manifest.xml "${{ inputs.manifest_url }}"
+          python3 ci/parse-manifest.py manifest.xml | tee metadata.env
+          cat metadata.env >> "$GITHUB_ENV"
+
+      - name: Download OTA boot.img and extract config / release / clang
+        if: ${{ inputs.use_ota }}
+        run: |
+          set -eux
+          mkdir -p bootwork build-config
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -A "Mozilla/5.0" \
+            -o bootwork/stock-boot.img "${{ inputs.boot_img_url }}"
+          stat -c 'boot.img size=%s' bootwork/stock-boot.img
+          sha256sum bootwork/stock-boot.img | tee bootwork/boot.sha256
+
+          if curl -fL --retry 3 --retry-all-errors -o bootwork/magiskboot "$MAGISKBOOT_URL_CACHED"; then
+            chmod +x bootwork/magiskboot
+          else
+            curl -fL --retry 3 --retry-all-errors -o Magisk.apk "$MAGISK_APK_URL"
+            unzip -o Magisk.apk lib/x86_64/libmagiskboot.so -d magisk
+            install -m 755 magisk/lib/x86_64/libmagiskboot.so bootwork/magiskboot
+          fi
+          chmod +x bootwork/magiskboot
+
+          cd bootwork
+          ./magiskboot unpack stock-boot.img
+          ls -lh kernel
+          sh ../kernel/scripts/extract-ikconfig kernel > ../build-config/stock.config
+          test "$(grep -c '^CONFIG_' ../build-config/stock.config)" -gt 1000
+
+          rel=$(strings kernel | grep -m1 'Linux version ' | sed -n 's/.*Linux version \([^ ]*\).*/\1/p')
+          clang_raw=$(strings kernel | grep -m1 'based on r[0-9]' | sed -n 's/.*based on \(r[0-9]*\).*/\1/p')
+          test -n "$rel"
+          test -n "$clang_raw"
+
+          mm=$(printf '%s' "$rel" | sed -n 's/^\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+          case "$mm" in
+            6.6)  kmi=android15-6.6 ;;
+            6.12) kmi=android16-6.12 ;;
+            6.1)  kmi=android14-6.1 ;;
+            5.15) kmi=android14-5.15 ;;
+            5.10) kmi=android13-5.10 ;;
+            6.18) kmi=android17-6.18 ;;
+            *) echo "::error::unsupported kernel $rel"; exit 1 ;;
+          esac
+
+          cd ..
+          gzip -c build-config/stock.config > config/hummer_config.gz
+          {
+            echo "EXPECTED_RELEASE=$rel"
+            echo "EXPECTED_CLANG=$clang_raw"
+            echo "CLANG_REV=clang-$clang_raw"
+            echo "CLANG_SHA=${CLANG_PROJECT_SHA:-}"
+            echo "KMI=$kmi"
+            echo "CONFIG_PATH=build-config/stock.config"
+          } >> "$GITHUB_ENV"
+          echo "mode=ota release=$rel clang=$clang_raw kmi=$kmi"
+
+      - name: Clone kernel source at the exact SHA
+        run: |
+          set -eux
+          mkdir -p kernel
+          cd kernel
+          git init -q
+          git remote add origin "https://github.com/${KERNEL_REPO}.git"
+          if ! git fetch --depth 1 --no-tags origin "$KERNEL_SHA"; then
+            echo "::warning::fetch by SHA failed, falling back to a deeper branch fetch"
+            git fetch --no-tags --depth 200 origin "$KERNEL_BRANCH" || git fetch --no-tags --depth 200 origin
+          fi
+          git checkout -q "$KERNEL_SHA" 2>/dev/null || git checkout -q FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$KERNEL_SHA"
+
+      - name: Clone modules source (sibling of kernel) at the exact SHA
+        run: |
+          set -eux
+          mkdir -p sm8750-modules
+          cd sm8750-modules
+          git init -q
+          git remote add origin "https://github.com/${MODULES_REPO}.git"
+          if ! git fetch --depth 1 --no-tags origin "$MODULES_SHA"; then
+            echo "::warning::fetch by SHA failed, falling back to a deeper branch fetch"
+            git fetch --no-tags --depth 200 origin "$MODULES_BRANCH" || git fetch --no-tags --depth 200 origin
+          fi
+          git checkout -q "$MODULES_SHA" 2>/dev/null || git checkout -q FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$MODULES_SHA"
+
+      - name: Prepare workspace paths
+        run: |
+          set -eux
+          ln -sfn kernel sm8750
+          test -s config/hummer_config.gz
+          test -d third_party/shikochin-lkm/src/port66
+
+      - name: Restore stock clang cache
+        id: clang-cache
+        uses: actions/cache@v4
+        with:
+          path: clang-stock
+          key: shikochin-hummer-clang-${{ inputs.use_ota }}-${{ hashFiles('metadata.env', 'config/hummer_config.gz') }}
+
+      - name: Download stock clang
+        run: |
+          set -eux
+          mkdir -p clang-stock
+          if [ -x clang-stock/bin/clang ]; then
+            echo "==> clang cache hit"
+            exit 0
+          fi
+          base="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive"
+          urls="
+            ${CLANG_SHA:+${base}/${CLANG_SHA}/${CLANG_REV}.tar.gz}
+            ${base}/refs/heads/android17-release/${CLANG_REV}.tar.gz
+            ${base}/refs/heads/android17-qpr1-release/${CLANG_REV}.tar.gz
+            ${base}/refs/heads/android17-qpr2-release/${CLANG_REV}.tar.gz
+          "
+          ok=0
+          for u in $urls; do
+            echo "==> try $u"
+            if curl -fL --retry 2 --retry-all-errors --connect-timeout 20 -o /tmp/clang.tar.gz "$u"; then
+              rm -rf clang-stock
+              mkdir -p clang-stock
+              tar -xzf /tmp/clang.tar.gz -C clang-stock
+              ok=1
+              break
+            fi
+          done
+          test "$ok" = "1"
+          test -x clang-stock/bin/clang
+          clang-stock/bin/clang --version | grep -q "$EXPECTED_CLANG"
+
+      - name: Save stock clang cache
+        if: ${{ steps.clang-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: clang-stock
+          key: shikochin-hummer-clang-${{ inputs.use_ota }}-${{ hashFiles('metadata.env', 'config/hummer_config.gz') }}
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: shikochin-hummer-ccache-${{ hashFiles('metadata.env', 'config/hummer_config.gz') }}-${{ env.CLANG_REV }}
+          restore-keys: |
+            shikochin-hummer-ccache-
+
+      - name: Pull DDK toolchain
+        run: docker pull "$DDK_IMAGE"
+
+      - name: Build exact KDIR (Image + Module.symvers)
+        run: |
+          set -eux
+          mkdir -p .ccache
+          docker run --rm \
+            -v "$PWD:/work" \
+            -v "$PWD/.ccache:/ccache" \
+            -w /work/kernel \
+            -e KERNELRELEASE="$EXPECTED_RELEASE" \
+            -e USE_STOCK_CLANG=1 \
+            -e EXPECTED_CLANG \
+            -e CCACHE_DIR=/ccache \
+            -e CCACHE_BASEDIR=/work/kernel \
+            -e CCACHE_COMPRESS=1 \
+            -e CCACHE_MAXSIZE=5G \
+            "$DDK_IMAGE" \
+            bash /work/ci/build-kdir.sh
+
+      - name: Build Shikochin namespace / optional modules
+        env:
+          BUILD_DEVTMPFS: ${{ inputs.build_devtmpfs }}
+          BUILD_NETFILTER: ${{ inputs.build_netfilter }}
+          BUILD_USERNS: ${{ inputs.build_userns }}
+        run: |
+          set -eux
+          docker run --rm \
+            -v "$PWD:/work" \
+            -w /work \
+            -e BUILD_DEVTMPFS \
+            -e BUILD_NETFILTER \
+            -e BUILD_USERNS \
+            -e HUMMER_RELEASE="$EXPECTED_RELEASE" \
+            -e KDIR=/work/kernel/out \
+            -e OUTROOT=/work/out-shikochin \
+            -e SHIKOCHIN=/work/third_party/shikochin-lkm \
+            "$DDK_IMAGE" \
+            bash /work/ci/build-shikochin-hummer.sh
+
+      - name: Package KernelSU zip
+        run: |
+          set -eux
+          python3 ci/package-shikochin.py \
+            --payloads out-shikochin/ko \
+            --output dist-shikochin \
+            --version "$MODULE_VERSION" \
+            --release "$EXPECTED_RELEASE" \
+            --kernel-sha "$KERNEL_SHA" \
+            --config-sha "$(sha256sum config/hummer_config.gz | awk '{print $1}')"
+          ls -lh dist-shikochin
+          sha256sum dist-shikochin/*.zip
+          python3 - <<'PY'
+          import zipfile, glob
+          z = zipfile.ZipFile(glob.glob('dist-shikochin/*.zip')[0])
+          print('\n'.join(z.namelist()))
+          PY
+
+      - name: Write build info
+        run: |
+          set -eux
+          {
+            echo "device:        OnePlus Ace 5 Pro (hummer)"
+            echo "mode:          $([ "${{ inputs.use_ota }}" = "true" ] && echo OTA || echo pinned)"
+            echo "manifest:      ${{ inputs.manifest_url }}"
+            echo "boot img:      ${{ inputs.boot_img_url }}"
+            echo "boot sha256:   $(awk '{print $1}' bootwork/boot.sha256 2>/dev/null || true)"
+            echo "kernel:        ${KERNEL_REPO} @ ${KERNEL_SHA}"
+            echo "modules:       ${MODULES_REPO} @ ${MODULES_SHA}"
+            echo "devicetrees:   ${DEVICETREES_SHA:-}"
+            echo "clang project: ${CLANG_PROJECT_SHA:-}"
+            echo "release:       ${EXPECTED_RELEASE}"
+            echo "KMI:           ${KMI}"
+            echo "config:        ${CONFIG_PATH}"
+            echo "source:        Shikochin/Droidspaces-LKM (vendored in third_party/shikochin-lkm)"
+            echo "clang:         $(clang-stock/bin/clang --version | head -n1)"
+            echo "devtmpfs:      ${{ inputs.build_devtmpfs }}"
+            echo "netfilter:     ${{ inputs.build_netfilter }}"
+            echo "userns:        ${{ inputs.build_userns }}"
+            echo
+            echo "build report:"
+            cat out-shikochin/build-report.txt
+            echo
+            echo "payload sha256:"
+            sha256sum dist-shikochin/*.ko 2>/dev/null || true
+            echo
+            echo "zip sha256:"
+            sha256sum dist-shikochin/*.zip
+          } > build-info-shikochin.txt
+          cat build-info-shikochin.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: droidspaces-hummer-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            dist-shikochin/*.zip
+            dist-shikochin/*.ko
+            dist-shikochin/SHA256SUMS
+            out-shikochin/build-report.txt
+            build-info-shikochin.txt
+
+      - name: Publish release
+        if: ${{ inputs.publish_release }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eux
+          tag="droidspaces-hummer-${GITHUB_RUN_ID}"
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" dist-shikochin/*.zip dist-shikochin/*.ko \
+              dist-shikochin/SHA256SUMS build-info-shikochin.txt \
+              -R "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" dist-shikochin/*.zip dist-shikochin/*.ko \
+              dist-shikochin/SHA256SUMS build-info-shikochin.txt \
+              -R "$GITHUB_REPOSITORY" \
+              --title "Droidspaces LKM hummer (Shikochin port) ${EXPECTED_RELEASE} (${GITHUB_RUN_ID})" \
+              --notes-file build-info-shikochin.txt
+          fi
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" --json url -q .url

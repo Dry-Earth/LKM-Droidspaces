@@ -12,6 +12,13 @@ modules.order
 test/
 dist/
 build/
+out-shikochin/
+dist-shikochin/
+__pycache__/
 .gradle/
 local.properties
 *.hprof
+
+# The vendored Shikochin tree keeps its build/test manifests under build/.
+!third_party/shikochin-lkm/build/
+!third_party/shikochin-lkm/build/**
