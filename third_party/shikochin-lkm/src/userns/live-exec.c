@@ -397,7 +397,9 @@ int ds_userns_begin_new_exec(struct linux_binprm * bprm)
 	 * no return). The later "sched_process_exec" tracepoint is called after
 	 * the current task has successfully switched to the new exec.
 	 */
+#ifndef DS_USERNS_66
 	trace_sched_prepare_exec(current, bprm);
+#endif
 
 	/*
 	 * Ensure all future errors are fatal.
@@ -514,6 +516,7 @@ int ds_userns_begin_new_exec(struct linux_binprm * bprm)
 	 * that will probably not be useful to admins running ps or similar.
 	 * Let's fix it up to be something reasonable.
 	 */
+#ifndef DS_USERNS_66
 	if (bprm->comm_from_dentry) {
 		/*
 		 * Hold RCU lock to keep the name from being freed behind our back.
@@ -527,7 +530,9 @@ int ds_userns_begin_new_exec(struct linux_binprm * bprm)
 		__set_task_comm(me, smp_load_acquire(&bprm->file->f_path.dentry->d_name.name),
 				true);
 		rcu_read_unlock();
-	} else {
+	} else
+#endif
+	{
 		__set_task_comm(me, kbasename(bprm->filename), true);
 	}
 
