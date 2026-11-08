@@ -28,6 +28,10 @@ export ARCH=arm64
 export LLVM=1
 export LLVM_IAS=1
 export CROSS_COMPILE=aarch64-linux-gnu-
+# The module deliberately calls internal helpers that vendor kernels do not
+# export.  KernelSU's ksud relocates them at load time; keep modpost from
+# turning those unresolved symbols into a build failure.
+export KBUILD_MODPOST_WARN=1
 
 test -d "$SHIKOCHIN/src/port66"
 test -s "$KDIR/Module.symvers"
