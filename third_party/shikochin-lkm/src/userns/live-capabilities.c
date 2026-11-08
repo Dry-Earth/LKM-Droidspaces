@@ -25,7 +25,9 @@
 #include <linux/binfmts.h>
 #include <linux/personality.h>
 #include <linux/mnt_idmapping.h>
+#ifndef DS_USERNS_66
 #include <uapi/linux/lsm.h>
+#endif
 
 #include "live.h"
 extern int file_caps_enabled;
