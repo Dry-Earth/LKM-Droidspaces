@@ -15,6 +15,15 @@ BUILD_NETFILTER=${BUILD_NETFILTER:-false}
 BUILD_USERNS=${BUILD_USERNS:-false}
 JOBS=${JOBS:-$(nproc)}
 
+# Must use the same compiler as the KDIR: r596125 knows __counted_by__,
+# the DDK default r510928 does not (and -Werror turns it into a failure).
+if [ "${USE_STOCK_CLANG:-1}" = "1" ] && [ -x /work/clang-stock/bin/clang ]; then
+	export PATH="/work/clang-stock/bin:$PATH"
+	echo "==> clang: stock $(clang --version | head -n1)"
+else
+	echo "==> clang: DDK $(clang --version | head -n1)"
+fi
+
 export ARCH=arm64
 export LLVM=1
 export LLVM_IAS=1
