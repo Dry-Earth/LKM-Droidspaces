@@ -48,6 +48,9 @@ static int __init ds_port_init(void)
 		pr_err("requires matching " DS_GKI_ANDROID "-" DS_GKI_VERSION " with gki=1 or the build VM\n");
 		return -EOPNOTSUPP;
 	}
+#ifdef DS_HUMMER_RELEASE
+	pr_info("hummer profile: %s\n", DS_HUMMER_RELEASE);
+#endif
 #else
 	/* Android model/BTF checks live in the supplied device test loader. */
 	if ((!plc110_kernel && (!vm || strcmp(utsname()->release,

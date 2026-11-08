@@ -21,6 +21,9 @@ fi
 if [ -d /data/adb/modules/phdroid ] && [ ! -f /data/adb/modules/phdroid/disable ]; then
 	abort '! 检测到已启用的 phDroid。两套 PID/IPC namespace 钩子不能共存：请先在 KernelSU 里停用 phDroid 并重启，再安装本模块。'
 fi
+if [ -d /data/adb/modules/droidspaces_lkm ] && [ ! -f /data/adb/modules/droidspaces_lkm/disable ]; then
+	abort '! 检测到已启用的 Shikochin droidspaces_lkm。请先停用它并重启，再安装本模块，避免两套 droidspaces_ns 冲突。'
+fi
 
 want=$(ds_build_release)
 rel=$(uname -r)

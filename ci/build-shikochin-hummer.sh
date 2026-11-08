@@ -112,6 +112,10 @@ if ! strings "$OUTROOT/ko/droidspaces_ns.ko" | grep -q 'parmtype=activate:bool';
 	echo "::error::droidspaces_ns.ko 缺少 activate 参数" >&2
 	exit 1
 fi
+if ! strings "$OUTROOT/ko/droidspaces_ns.ko" | grep -q 'hummer profile:'; then
+	echo "::error::HUMMER_RELEASE 没有编译进模块，运行时会被 release 检查拒绝" >&2
+	exit 1
+fi
 
 echo "==> payloads"
 ls -lh "$OUTROOT/ko"
