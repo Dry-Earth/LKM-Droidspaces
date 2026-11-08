@@ -124,4 +124,5 @@ static void __exit ds_port_exit(void)
 module_init(ds_port_init);
 module_exit(ds_port_exit);
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 MODULE_DESCRIPTION("Experimental PID/IPC namespace port for recorded 6.6 kernels and PLC110 testing");
