@@ -7,6 +7,16 @@ PID / IPC / SYSVIPC / POSIX mqueue 能力，不刷内核、保持 Systemless。
 的 fork，已同步到上游 **9f65632**（2026-11-05，包含
 `fix panic` / `fix pid cache` / native PID），目标设备：
 
+> **新增：Shikochin 移植**
+>
+> 仓库现在同时包含 [Shikochin/Droidspaces-LKM](https://github.com/Shikochin/Droidspaces-LKM)
+> 的第二套 6.6 实现（PID/IPC namespace + 可选 devtmpfs），源码在
+> `third_party/shikochin-lkm/`，构建入口是
+> `.github/workflows/build-hummer-shikochin.yml`（支持 OTA 自动解析，
+> 也可以关闭 `use_ota` 用固定 SHA）。
+> 模块 ID 为 `droidspaces_hummer`，**不能和 phDroid 同时启用**。
+> 说明、限制和安装步骤见 [README-SHIKOCHIN.md](README-SHIKOCHIN.md)。
+
 | 项目 | 值 |
 |---|---|
 | 机型 | 一加 Ace 5 Pro（`hummer`） |
