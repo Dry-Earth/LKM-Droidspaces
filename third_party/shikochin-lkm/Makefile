@@ -36,6 +36,22 @@ ccflags-y += -include $(src)/src/userns/live-names.h
 LINUXINCLUDE := -I$(src)/src/userns/compat $(LINUXINCLUDE)
 endif
 ccflags-y += -I$(srctree)/fs/proc -I$(srctree)/fs -I$(srctree)
+ifeq ($(USERNS66),1)
+# 6.6 subset: mount namespace, superblock shrinker, setuid audit and FUSE
+# internals are still 6.12-only and are added back after their own ports.
+droidspaces_ns-y += src/userns/user_namespace.o src/userns/credentials.o src/userns/utsname.o \
+	src/userns/live-credentials.o src/userns/live-ucounts.o src/userns/live-proc.o \
+	src/userns/live-syscalls.o src/userns/live-groups.o src/userns/live-stat.o \
+	src/userns/live-capabilities.o src/userns/live-proc-status.o src/userns/live-nsfs.o \
+	src/userns/nsfs-original.o src/userns/live-vfs.o src/userns/live-exec.o \
+	src/userns/live-mm.o src/userns/mm-original.o src/userns/live-fs-context.o \
+	src/userns/live-sock.o src/userns/sock-original.o src/userns/live-scm.o \
+	src/userns/live-unix.o src/userns/live-netlink.o src/userns/live-cgroup.o \
+	src/userns/live-time.o src/userns/live-sysfs.o
+ccflags-y += -DCONFIG_USER_NS=1 -DDS_USERNS_LIVE=1 -DDS_USERNS_66=1
+ccflags-y += -include $(src)/src/userns/live-names.h
+LINUXINCLUDE := -I$(src)/src/userns/compat66 $(LINUXINCLUDE)
+endif
 else ifeq ($(TARGET),compat)
 obj-m := droidspaces_compat.o
 droidspaces_compat-y := src/compat/main.o

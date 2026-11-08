@@ -217,7 +217,7 @@ static void free_user_ns(struct work_struct *work)
 			kfree(ns->projid_map.forward);
 			kfree(ns->projid_map.reverse);
 		}
-#if IS_ENABLED(CONFIG_BINFMT_MISC)
+#if IS_ENABLED(CONFIG_BINFMT_MISC) && !defined(DS_USERNS_66)
 		kfree(ns->binfmt_misc);
 #endif
 		retire_userns_sysctls(ns);

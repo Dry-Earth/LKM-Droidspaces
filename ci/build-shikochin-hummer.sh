@@ -85,7 +85,7 @@ fi
 # Optional: USER_NS live port.  Upstream only validates this on 6.12; keep it
 # behind an explicit switch until a 6.6 device regression exists.
 if [ "$BUILD_USERNS" = true ]; then
-	if build_one userns TARGET=namespace PORT_DIR=src/port66 USERNS=1 \
+	if build_one userns TARGET=namespace PORT_DIR=src/port66 USERNS66=1 \
 		GKI_ANDROID=android15 GKI_VERSION=6.6 >"$OUTROOT/userns.log" 2>&1; then
 		cp "$OUTROOT/userns/droidspaces_ns.ko" "$OUTROOT/ko/droidspaces_ns_userns.ko"
 		record userns ok "$OUTROOT/ko/droidspaces_ns_userns.ko"
