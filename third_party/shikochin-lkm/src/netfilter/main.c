@@ -67,4 +67,5 @@ module_init(ds_netfilter_init);
 module_exit(ds_netfilter_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Shikochin");
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 MODULE_DESCRIPTION("Droidspaces xt_addrtype and nftables");

@@ -153,4 +153,5 @@ static int __init ds_init(void)
 module_init(ds_init);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Shikochin");
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 MODULE_DESCRIPTION("Late-loaded devtmpfs for Droidspaces");

@@ -116,16 +116,24 @@ fi
 record namespace ok "$OUTROOT/ko/droidspaces_ns.ko"
 
 # Hard stop if the mandatory payload does not target the requested kernel.
-if ! strings "$OUTROOT/ko/droidspaces_ns.ko" | grep -q "^vermagic=$HUMMER_RELEASE "; then
-	echo "::error::droidspaces_ns.ko vermagic 不包含 $HUMMER_RELEASE" >&2
-	strings "$OUTROOT/ko/droidspaces_ns.ko" | grep -m1 '^vermagic=' >&2 || true
-	exit 1
-fi
-if ! strings "$OUTROOT/ko/droidspaces_ns.ko" | grep -q 'parmtype=activate:bool'; then
+# Write strings to a file first: `strings | grep -q` can make strings die with
+# SIGPIPE, which `set -o pipefail` turns into a false build failure.
+NS_KO=$OUTROOT/ko/droidspaces_ns.ko
+strings "$NS_KO" > "$OUTROOT/namespace.strings"
+VM=$(grep -m1 '^vermagic=' "$OUTROOT/namespace.strings" || true)
+case "$VM" in
+	"vermagic=$HUMMER_RELEASE "*) ;;
+	*)
+		echo "::error::droidspaces_ns.ko vermagic 不包含 $HUMMER_RELEASE" >&2
+		echo "$VM" >&2
+		exit 1
+		;;
+esac
+if ! grep -q 'parmtype=activate:bool' "$OUTROOT/namespace.strings"; then
 	echo "::error::droidspaces_ns.ko 缺少 activate 参数" >&2
 	exit 1
 fi
-if ! strings "$OUTROOT/ko/droidspaces_ns.ko" | grep -q 'hummer profile:'; then
+if ! grep -q 'hummer profile:' "$OUTROOT/namespace.strings"; then
 	echo "::error::HUMMER_RELEASE 没有编译进模块，运行时会被 release 检查拒绝" >&2
 	exit 1
 fi
