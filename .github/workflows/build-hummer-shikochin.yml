@@ -367,6 +367,7 @@ jobs:
             dist-shikochin/*.ko
             dist-shikochin/SHA256SUMS
             out-shikochin/build-report.txt
+            out-shikochin/*.log
             build-info-shikochin.txt
 
       - name: Publish release
