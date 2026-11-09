@@ -26,6 +26,8 @@ extern struct rb_root mnt_ns_tree;
 extern atomic64_t mnt_ns_seq;
 extern struct rw_semaphore namespace_sem;
 
+#ifndef DS_USERNS_66
+
 
 static inline struct mnt_namespace *node_to_mnt_ns(const struct rb_node *node)
 {
@@ -875,4 +877,45 @@ bool ds_userns_mnt_may_suid(struct vfsmount *mnt)
 	return !(mnt->mnt_flags & MNT_NOSUID) && (real_mount(mnt)->mnt_ns == current->nsproxy->mnt_ns) &&
 	       current_in_userns(mnt->mnt_sb->s_user_ns);
 }
+
+#else /* DS_USERNS_66 */
+
+/* 6.6 has no mount-namespace tree, mnt_ns_release or statmount/listmount.
+ * Keep the native lifecycle and repair only the user_namespace transfers
+ * that CONFIG_USER_NS=n compiled away. */
+#include "mount.h"
+#define alloc_mnt_ns ds_userns_alloc_mnt_ns
+#define free_mnt_ns ds_userns_free_mnt_ns
+
+extern struct mnt_namespace *ds_userns_alloc_mnt_ns_original(struct user_namespace *, bool);
+
+struct mnt_namespace *alloc_mnt_ns(struct user_namespace *user_ns, bool anon)
+{
+	struct mnt_namespace *ns = ds_userns_alloc_mnt_ns_original(user_ns, anon);
+
+	if (!IS_ERR(ns)) {
+		/* The native USER_NS=n get_user_ns() stored init_user_ns
+		 * without taking a reference; install the real one. */
+		ns->user_ns = get_user_ns(user_ns);
+	}
+	return ns;
+}
+
+void free_mnt_ns(struct mnt_namespace *ns)
+{
+	if (!is_anon_ns(ns))
+		ns_free_inum(&ns->ns);
+	dec_ucount(ns->ucounts, UCOUNT_MNT_NAMESPACES);
+	put_user_ns(ns->user_ns);
+	kfree(ns);
+}
+
+bool ds_userns_mnt_may_suid(struct vfsmount *mnt)
+{
+	return !(mnt->mnt_flags & MNT_NOSUID) &&
+	       (real_mount(mnt)->mnt_ns == current->nsproxy->mnt_ns) &&
+	       current_in_userns(mnt->mnt_sb->s_user_ns);
+}
+
+#endif /* DS_USERNS_66 */
 

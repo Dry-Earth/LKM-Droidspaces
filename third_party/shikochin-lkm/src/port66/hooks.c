@@ -20,6 +20,7 @@
 #ifdef DS_USERNS_LIVE
 #include "../userns/live.h"
 extern u32 ds_userns_mm_init_original[], ds_userns_sk_getsockopt_original[];
+extern u32 ds_userns_alloc_mnt_ns_original[];
 #include <linux/user_namespace.h>
 #include <linux/utsname.h>
 #endif
@@ -250,6 +251,9 @@ static struct ds_hook hooks[] = {
 	HOOK("destroy_super_work", ds_userns_destroy_super_work),
 	HOOK("sget_fc", ds_userns_sget_fc),
 	HOOK("sget", ds_userns_sget),
+	HOOK_ORIGINAL("alloc_mnt_ns", ds_userns_alloc_mnt_ns, ds_userns_alloc_mnt_ns_original),
+	HOOK("free_mnt_ns", ds_userns_free_mnt_ns),
+	HOOK("mnt_may_suid", ds_userns_mnt_may_suid),
 	HOOK("prepare_creds", ds_userns_prepare_creds),
 	HOOK("prepare_kernel_cred", ds_userns_prepare_kernel_cred),
 	HOOK("__put_cred", ds_userns_put_cred),
