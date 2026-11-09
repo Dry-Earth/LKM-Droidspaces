@@ -87,8 +87,20 @@ fi
 if [ "$BUILD_USERNS" = true ]; then
 	if build_one userns TARGET=namespace PORT_DIR=src/port66 USERNS66=1 \
 		GKI_ANDROID=android15 GKI_VERSION=6.6 >"$OUTROOT/userns.log" 2>&1; then
-		cp "$OUTROOT/userns/droidspaces_ns.ko" "$OUTROOT/ko/droidspaces_ns_userns.ko"
-		record userns ok "$OUTROOT/ko/droidspaces_ns_userns.ko"
+		# Runtime preflight rejects missing symbols and unpatchable prologues
+		# before any code is written.  Apply the same rules to the exact KDIR
+		# so a useless payload never reaches the device.
+		if python3 /work/ci/check-userns-hooks.py \
+			--vmlinux "$KDIR/vmlinux" \
+			--hooks "$SHIKOCHIN/src/port66/hooks.c" \
+			--release "$HUMMER_RELEASE" >>"$OUTROOT/userns.log" 2>&1; then
+			cp "$OUTROOT/userns/droidspaces_ns.ko" "$OUTROOT/ko/droidspaces_ns_userns.ko"
+			record userns ok "$OUTROOT/ko/droidspaces_ns_userns.ko"
+		else
+			echo "::warning::USER_NS 钩子静态预检失败；未打包。" >&2
+			tail -n 40 "$OUTROOT/userns.log" >&2 || true
+			record userns failed ""
+		fi
 	else
 		echo "::warning::USER_NS 变体在当前 6.6 源码上构建失败；未打包。" >&2
 		tail -n 80 "$OUTROOT/userns.log" >&2 || true
