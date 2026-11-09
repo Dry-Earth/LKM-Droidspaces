@@ -19,7 +19,6 @@
 #include "ipc-backend.h"
 #ifdef DS_USERNS_LIVE
 #include "../userns/live.h"
-extern u32 ds_userns_ns_ioctl_original[];
 extern u32 ds_userns_mm_init_original[], ds_userns_sk_getsockopt_original[];
 #include <linux/user_namespace.h>
 #include <linux/utsname.h>
@@ -208,7 +207,7 @@ static struct ds_hook hooks[] = {
 	HOOK("timens_on_fork", ds_userns_timens_on_fork),
 	HOOK("free_time_ns", ds_userns_free_time_ns),
 	HOOK("sysfs_init_fs_context", ds_userns_sysfs_init_fs_context),
-	HOOK_ORIGINAL("ns_ioctl", ds_userns_ns_ioctl, ds_userns_ns_ioctl_original),
+	HOOK("ns_ioctl", ds_userns_ns_ioctl),
 	HOOK("net_ns_get_ownership", ds_userns_net_ns_get_ownership),
 	HOOK_ORIGINAL("mm_init", ds_userns_mm_init, ds_userns_mm_init_original),
 	HOOK("__mmdrop", ds_userns_mmdrop),

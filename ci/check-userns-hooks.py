@@ -25,7 +25,7 @@ import subprocess
 import sys
 
 HOOK_RE = re.compile(r'HOOK(?:_ORIGINAL)?\(\s*"([^"]+)"')
-SYSCALL_RE = re.compile(r'^\s*IPC_SYSCALL\(\s*([a-z0-9_]+)\s*\)')
+SYSCALL_RE = re.compile(r'(?<!DECLARE_)IPC_SYSCALL\(\s*([a-z0-9_]+)\s*\)')
 SYSCALL_DECL_RE = re.compile(r'^\s*DECLARE_IPC_SYSCALL\(\s*([a-z0-9_]+)\s*\)')
 
 MOVABLE_MNEMONICS = {"nop", "paciasp"}
@@ -93,13 +93,19 @@ def disassemble(od, vmlinux, addr, size):
 def is_movable(mnemonic, operands):
     if mnemonic in MOVABLE_MNEMONICS:
         return True
-    if mnemonic == "sub" and re.match(r'^sp, sp, #0x[0-9a-f]+$', operands):
+    if mnemonic == "sub" and re.match(r'^sp, sp, #(?:0x[0-9a-f]+|\d+)$', operands):
         return True
-    if mnemonic in ("add", "mov") and re.match(r'^x29, sp(, #0x[0-9a-f]+)?$', operands):
+    if mnemonic == "mov" and operands == "x29, sp":
         return True
-    if mnemonic in ("stp", "str") and "sp" in operands:
-        # Any stack store with SP as the base is position independent here.
+    if mnemonic == "add" and re.match(r'^x29, sp(?:, #(?:0x0|0))?$', operands):
         return True
+    if mnemonic == "str":
+        # Only the 64-bit STR (unsigned offset) form is position independent.
+        return bool(re.match(r'^x\d+, \[sp(?:, #(?:0x[0-9a-f]+|\d+))?\]$', operands))
+    if mnemonic == "stp":
+        # Signed-offset or pre-index STP with SP as the base.
+        return bool(re.match(r'^x\d+, x\d+, \[sp(?:, #-?(?:0x[0-9a-f]+|\d+))?\]!?$',
+                             operands))
     return False
 
 
@@ -121,10 +127,7 @@ def parse_hooks(path):
                 name = m.group(1)
                 original = "HOOK_ORIGINAL" in line.split(name)[0]
                 hooks.append((name, original))
-                continue
-            m = SYSCALL_RE.match(line)
-            if m:
-                syscalls.append(m.group(1))
+            syscalls.extend(SYSCALL_RE.findall(line))
     # newfstat/newfstatat are declared but installed through HOOK().
     return hooks, [s for s in syscalls if s in declared]
 
@@ -169,8 +172,8 @@ def main():
         if original:
             bad = [i for i, ins in enumerate(insns[:4]) if not is_movable(*ins)]
             if bad:
-                failures.append("unmovable original prologue: %s word %d" %
-                                (name, bad[0]))
+                failures.append("unmovable original prologue: %s word %d %r" %
+                                (name, bad[0], insns[:4]))
             continue
         early = None
         for i, (mnemonic, _) in enumerate(insns[:3]):

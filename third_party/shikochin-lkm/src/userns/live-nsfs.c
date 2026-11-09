@@ -8,14 +8,22 @@
 #include <net/net_namespace.h>
 #include "live.h"
 extern int open_related_ns(struct ns_common *, struct ns_common *(*)(struct ns_common *));
-extern long ds_userns_ns_ioctl_original(struct file *, unsigned int, unsigned long);
 long ds_userns_ns_ioctl(struct file *file, unsigned int request, unsigned long arg)
 {
 	struct ns_common *ns = get_proc_ns(file_inode(file));
 
-	if (request == NS_GET_USERNS)
+	/* Complete 6.6 implementation: the native prologue is not a clean
+	 * position-independent trampoline, so never rely on one. */
+	switch (request) {
+	case NS_GET_USERNS:
 		return open_related_ns(ns, ns_get_owner);
-	if (request == NS_GET_OWNER_UID) {
+	case NS_GET_PARENT:
+		if (!ns->ops->get_parent)
+			return -EINVAL;
+		return open_related_ns(ns, ns->ops->get_parent);
+	case NS_GET_NSTYPE:
+		return ns->ops->type;
+	case NS_GET_OWNER_UID: {
 		struct user_namespace *owner;
 		uid_t uid;
 
@@ -25,7 +33,9 @@ long ds_userns_ns_ioctl(struct file *file, unsigned int request, unsigned long a
 		uid = from_kuid_munged(current_user_ns(), owner->owner);
 		return put_user(uid, (uid_t __user *)arg);
 	}
-	return ds_userns_ns_ioctl_original(file, request, arg);
+	default:
+		return -ENOTTY;
+	}
 }
 
 void ds_userns_net_ns_get_ownership(const struct net *net, kuid_t *uid, kgid_t *gid)
