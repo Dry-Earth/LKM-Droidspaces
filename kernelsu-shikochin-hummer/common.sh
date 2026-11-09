@@ -119,6 +119,12 @@ ds_insmod() {
 	fi
 }
 
+ds_native_userns() {
+	# CONFIG_USER_NS=n kernels do not create uid_map/gid_map under /proc.
+	# The LKM adds them only after activation, so presence here means native.
+	[ -e /proc/self/uid_map ] && [ -e /proc/self/gid_map ]
+}
+
 ds_module_for_namespace() {
 	if [ "$(ds_conf userns 0)" = 1 ] && [ -f "$MODDIR/kernel/droidspaces_ns_userns.ko" ]; then
 		printf '%s\n' "$MODDIR/kernel/droidspaces_ns_userns.ko"
@@ -171,6 +177,10 @@ ds_load_all() {
 	fi
 
 	ns=$(ds_module_for_namespace)
+	if [ "$ns" = "$MODDIR/kernel/droidspaces_ns_userns.ko" ] && ds_native_userns; then
+		ds_status '[不兼容] 内核已原生启用 USER_NS（存在 /proc/self/uid_map）；禁止加载 LKM userns 变体。请把 userns 设为 0，或使用与 LKM 线对应的 stock boot。'
+		return 1
+	fi
 	ds_log "loading $ns"
 	out=$(ds_insmod "$ns" "gki=1 activate=1" 2>&1)
 	rc=$?
@@ -332,5 +342,7 @@ ds_show_status() {
 	printf 'devtmpfs_ko=%s\n' "$([ -f "$MODDIR/kernel/droidspaces_devtmpfs.ko" ] && echo 1 || echo 0)"
 	printf 'netfilter_ko=%s\n' "$([ -f "$MODDIR/kernel/droidspaces_netfilter.ko" ] && echo 1 || echo 0)"
 	printf 'userns_ko=%s\n' "$([ -f "$MODDIR/kernel/droidspaces_ns_userns.ko" ] && echo 1 || echo 0)"
+	printf 'userns_cfg=%s\n' "$(ds_conf userns 0)"
+	printf 'native_userns=%s\n' "$(ds_native_userns && echo 1 || echo 0)"
 	printf 'status=%s\n' "$(cat "$DS_STATUS" 2>/dev/null)"
 }

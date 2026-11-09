@@ -32,28 +32,38 @@ ci/package-shikochin-hummer.py      # 生成 KernelSU ZIP
 | PID 引用生命周期（perf / FUSE / cgroup-v1 / BPF iterator） | `src/port66` | 随主模块构建 |
 | 容器 reboot / memfd namespace 策略 | `src/port66` | 随主模块构建 |
 | devtmpfs | `src/devtmpfs` | 可选，默认构建；构建失败自动跳过 |
-| USER_NS 沙箱 | `src/userns` | **6.6 尚未移植完成**；源码保留，默认不构建 |
+| USER_NS 沙箱 | `src/userns` | **6.6 核心子集可构建**（可选 `droidspaces_ns_userns.ko`）；mount/super/identity/FUSE 仍为 6.12-only，默认不构建 |
 | Docker nftables / xt_addrtype | `src/netfilter` | **上游是 6.12 nf_tables 快照**；6.6 默认不构建 |
 | 厂商 PID 引用泄漏修复 | `src/compat` | PLZ110 专用；hummer 未启用 |
 | 加载前 ABI / 指纹检查 | `src/abi` + KernelSU 脚本 | 本项目用“精确 KDIR + 完整 release + vermagic + SHA-256”替代 |
 | 多 KMI 选择 | `kernelsu/` | hummer 单目标，不做多载荷路由 |
 
-### 为什么 userns / netfilter 在 6.6 上不能用
+### 为什么 userns / netfilter 在 6.6 上仍有限制
 
 上游的 USER_NS live port 依赖 6.12 的 `statmount` / `listmount`、FUSE 和
-mount namespace 内部接口；netfilter 直接携带 6.12 的 `nf_tables` 快照。
-这两块不是改一个 `#if` 就能跑，需要按 6.6 内核源码重新移植和回归。
+mount namespace 内部接口。6.6 版本目前只移植了**核心子集**：
+
+- 已包含：userns/cred/ucounts/utsname、proc uid_map/gid_map、capabilities、
+  exec/mm 凭据、stat/faccessat/chown、cgroup/time/sysfs、socket/scm/unix/netlink；
+- 仍排除：`live-mount.c`（6.12 mount-ns / statmount 内部）、`live-super.c`
+  （6.12 shrinker API）、`live-identity.c`（6.12 audit trace hook）、
+  `live-fuse*.c`（6.12 FUSE 内部）。
+
+因此 6.6 的 userns 变体**不是安全边界**：`setuid/setgid` 等 identity 系统调用
+尚未接管，不要把不可信进程放进容器当作隔离。需要真正隔离时优先走原生内核
+路线（`hummer-lineage-kernel-build` 的 v3+USER_NS boot.img）。
+
+netfilter 仍然直接携带 6.12 的 `nf_tables` 快照，6.6 默认不构建。
 
 所以本移植的策略是：
 
 1. **namespace + devtmpfs 先落地**，这是 Droidspaces rootful 容器真正需要的；
-2. userns / netfilter 源码与构建入口保留，工作流里用开关控制；
+2. userns 核心子集单独构建为 `droidspaces_ns_userns.ko`，默认关闭；
 3. 构建成功才打包，失败写 `out-shikochin/build-report.txt`，不会静默假装支持；
-4. README 和模块简介明确写出当前能力，不把“源码在仓库里”说成“6.6 已可用”。
-
-如果确实需要真正的 UID 隔离 / nftables，优先走原生内核路线
-（`hummer-kernel-ci` 的 boot.img，直接打开 `CONFIG_USER_NS` / `CONFIG_NF_TABLES`），
-而不是在 6.6 上强行伪造。
+4. userns 载荷在 CI 里对**精确 KDIR 的 vmlinux** 做静态预检（符号存在 +
+   前 4 条指令可打补丁），运行时 `ds_hooks_prepare()` 再预检一次；任何一项
+   不通过都拒绝加载，不写任何补丁；
+5. README 和模块简介明确写出当前能力，不把“源码在仓库里”说成“6.6 已可用”。
 
 ---
 
@@ -65,7 +75,7 @@ mount namespace 内部接口；netfilter 直接携带 6.12 的 `nf_tables` 快�
 | 模块 ID | `phdroid` | `droidspaces_hummer` |
 | PID 后端 | upstream native PID | Shikochin 6.6 port |
 | devtmpfs | 默认不构建 | 可选构建 |
-| USER_NS | 伪造，默认关闭 | 6.12 源码，6.6 默认关闭 |
+| USER_NS | 伪造，默认关闭 | 6.6 核心子集（可选 userns 变体），默认关闭 |
 | 加载策略 | `auto` 文件 opt-in | `auto` 文件 opt-in + 崩溃保护 |
 | 同时启用 | **禁止** | **禁止** |
 
@@ -97,7 +107,7 @@ GitHub → **Actions** → **Build hummer Droidspaces-LKM (Shikochin port / OTA)
 | `publish_release` | ✅ | 成功后自动发 Release |
 | `build_devtmpfs` | ✅ | 构建 `droidspaces_devtmpfs.ko` |
 | `build_netfilter` | ❌ | 尝试 6.12 nf_tables 快照；6.6 大概率失败 |
-| `build_userns` | ❌ | 尝试 USER_NS 变体；6.6 大概率失败 |
+| `build_userns` | ❌ | 构建 USER_NS 6.6 核心子集；静态 + 运行时预检不通过则不打包 |
 
 OTA 模式流程（与 phDroid 的 OTA 工作流一致）：
 
@@ -153,6 +163,40 @@ su -c 'mkdir -p /data/adb/droidspaces_hummer; touch /data/adb/droidspaces_hummer
 > “加载后崩溃”并 `blocked`。可改短：
 > `echo 30 > /data/adb/droidspaces_hummer/alive_sec`。
 
+### 可选：USER_NS 6.6 变体（实验）
+
+仅在 zip 内包含 `droidspaces_ns_userns.ko` 时可用。它替换的是核心凭据 /
+ucounts / proc / capabilities / exec / mm 路径，**仍然不是安全沙箱**。
+
+1. 确认当前是 **stock boot**（`CONFIG_USER_NS=n`）；不要和 v3+USER_NS boot.img
+   同时使用。加载器检测到 `/proc/self/uid_map` 已存在会直接拒绝。
+2. 把 `config.conf` 的 `userns=1`，保持 `auto` 关闭，重启后手动加载：
+
+```sh
+su -c 'sh /data/adb/modules/droidspaces_hummer/service.sh load'
+su -c 'cat /data/adb/droidspaces_hummer/load.log'
+```
+
+3. 日志应出现：
+
+```text
+userns: ... preserves N native entries, adds 4 mapping entries
+entry preflight passed: ... functions ...
+experimental namespace hooks active
+```
+
+如果预检失败，`insmod` 会返回错误且**不会写入任何补丁**；这是预期失败，
+保留 `load.log` 和 `dmesg` 即可。
+4. 基础验证：
+
+```sh
+su -c 'cat /proc/self/uid_map; cat /proc/self/gid_map'
+su -c 'unshare -U -r sh -c "id; cat /proc/self/uid_map"'
+```
+
+5. 连续启动/停止容器 3 次；出现 panic/卡死时脚本会在两次异常后 `blocked`，
+   pstore 会保存在 `/data/adb/droidspaces_hummer/pstore/`。
+
 ### 状态含义
 
 | 简介 | 含义 |
@@ -190,7 +234,7 @@ su -c 'sh /data/adb/modules/droidspaces_hummer/service.sh unload'
 namespace=1    # 主模块（必须）
 devtmpfs=1     # 容器 /dev；没有对应 .ko 时打包器会自动改成 0
 netfilter=0    # Docker nftables；6.6 默认不构建
-userns=0       # USER_NS 变体；6.6 默认不构建
+userns=0       # USER_NS 变体（需 droidspaces_ns_userns.ko）；默认关闭，不能与原生 USER_NS 内核同时使用
 ```
 
 修改后重启生效。
@@ -201,7 +245,10 @@ userns=0       # USER_NS 变体；6.6 默认不构建
 
 - 本移植**还没有在 hummer 真机上验证**；当前只完成源码集成、精确 KDIR 构建链和
   KernelSU 打包。第一次安装请保留手动加载，先看 `load.log`。
-- USER_NS 在 6.6 上仍是“源码存在但不可用”；不要把它当安全沙箱。
+- USER_NS 6.6 变体只覆盖核心子集，**不是安全沙箱**：identity 系统调用
+  （setuid/setgid 等）、mount namespace 和 FUSE 仍未接管；不要把不可信进程放进去。
+- 原生 USER_NS 内核（v3+USER_NS boot.img）与 LKM userns 变体**不能同时使用**；
+  加载器检测到 `/proc/self/uid_map` 已存在会直接拒绝。
 - netfilter 是 6.12 `nf_tables` 快照，6.6 默认不构建；需要 Docker NAT/nftables
   时优先用原生内核打开 `CONFIG_NF_TABLES` / `CONFIG_NETFILTER_XT_MATCH_ADDRTYPE`。
 - 主模块使用未导出符号和入口替换；**只对完整 release
