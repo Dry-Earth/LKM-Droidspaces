@@ -7,8 +7,6 @@
 #include <linux/fs.h>
 #include <linux/security.h>
 #include <linux/backing-dev.h>
-#include <linux/cleancache.h>
-#include <linux/fsnotify.h>
 #include <linux/user_namespace.h>
 #include <linux/fs_context.h>
 #include <uapi/linux/mount.h>
@@ -16,7 +14,7 @@
 #include "live.h"
 extern struct list_head super_blocks;
 extern spinlock_t sb_lock;
-extern bool grab_super(struct super_block *);
+extern bool grab_super_dead(struct super_block *);
 extern unsigned long super_cache_scan(struct shrinker *, struct shrink_control *);
 extern unsigned long super_cache_count(struct shrinker *, struct shrink_control *);
 #define alloc_super ds_userns_alloc_super
@@ -41,11 +39,13 @@ void destroy_super_work(struct work_struct *work)
 {
 	struct super_block *s = container_of(work, struct super_block,
 							destroy_work);
-	fsnotify_sb_free(s);
-	security_sb_free(s);
+	int i;
+
+	/* Native __put_super() already did security_sb_free() and
+	 * kfree(s_subtype); only the USER_NS=n put_user_ns() stub was a no-op,
+	 * so take the real reference drop here. */
 	put_user_ns(s->s_user_ns);
-	kfree(s->s_subtype);
-	for (int i = 0; i < SB_FREEZE_LEVELS; i++)
+	for (i = 0; i < SB_FREEZE_LEVELS; i++)
 		percpu_free_rwsem(&s->s_writers.rw_sem[i]);
 	kfree(s);
 }
@@ -57,7 +57,9 @@ static void destroy_unused_super(struct super_block *s)
 	super_unlock_excl(s);
 	list_lru_destroy(&s->s_dentry_lru);
 	list_lru_destroy(&s->s_inode_lru);
-	shrinker_free(s->s_shrink);
+	security_sb_free(s);
+	kfree(s->s_subtype);
+	free_prealloced_shrinker(&s->s_shrink);
 	/* no delays needed */
 	destroy_super_work(&s->destroy_work);
 }
@@ -65,7 +67,7 @@ static void destroy_unused_super(struct super_block *s)
 struct super_block *alloc_super(struct file_system_type *type, int flags,
 				       struct user_namespace *user_ns)
 {
-	struct super_block *s = kzalloc(sizeof(struct super_block), GFP_KERNEL);
+	struct super_block *s = kzalloc(sizeof(struct super_block), GFP_USER);
 	static const struct super_operations default_op;
 	int i;
 
@@ -124,21 +126,17 @@ struct super_block *alloc_super(struct file_system_type *type, int flags,
 	s->s_time_gran = 1000000000;
 	s->s_time_min = TIME64_MIN;
 	s->s_time_max = TIME64_MAX;
-	s->cleancache_poolid = CLEANCACHE_NO_POOL;
 
-	s->s_shrink = shrinker_alloc(SHRINKER_NUMA_AWARE | SHRINKER_MEMCG_AWARE,
-				     "sb-%s", type->name);
-	if (!s->s_shrink)
+	s->s_shrink.seeks = DEFAULT_SEEKS;
+	s->s_shrink.scan_objects = super_cache_scan;
+	s->s_shrink.count_objects = super_cache_count;
+	s->s_shrink.batch = 1024;
+	s->s_shrink.flags = SHRINKER_NUMA_AWARE | SHRINKER_MEMCG_AWARE;
+	if (prealloc_shrinker(&s->s_shrink, "sb-%s", type->name))
 		goto fail;
-
-	s->s_shrink->scan_objects = super_cache_scan;
-	s->s_shrink->count_objects = super_cache_count;
-	s->s_shrink->batch = 1024;
-	s->s_shrink->private_data = s;
-
-	if (list_lru_init_memcg(&s->s_dentry_lru, s->s_shrink))
+	if (list_lru_init_memcg(&s->s_dentry_lru, &s->s_shrink))
 		goto fail;
-	if (list_lru_init_memcg(&s->s_inode_lru, s->s_shrink))
+	if (list_lru_init_memcg(&s->s_inode_lru, &s->s_shrink))
 		goto fail;
 	return s;
 
@@ -204,7 +202,7 @@ retry:
 	hlist_add_head(&s->s_instances, &s->s_type->fs_supers);
 	spin_unlock(&sb_lock);
 	get_filesystem(s->s_type);
-	shrinker_register(s->s_shrink);
+	register_shrinker_prepared(&s->s_shrink);
 	return s;
 
 share_extant_sb:
@@ -217,7 +215,7 @@ share_extant_sb:
 			warnfc(fc, "reusing existing filesystem in another namespace not allowed");
 		return ERR_PTR(-EBUSY);
 	}
-	if (!grab_super(old))
+	if (!grab_super_dead(old))
 		goto retry;
 	destroy_unused_super(s);
 	return old;
@@ -252,7 +250,7 @@ retry:
 				destroy_unused_super(s);
 				return ERR_PTR(-EBUSY);
 			}
-			if (!grab_super(old))
+			if (!grab_super_dead(old))
 				goto retry;
 			destroy_unused_super(s);
 			return old;
@@ -278,7 +276,7 @@ retry:
 	hlist_add_head(&s->s_instances, &type->fs_supers);
 	spin_unlock(&sb_lock);
 	get_filesystem(type);
-	shrinker_register(s->s_shrink);
+	register_shrinker_prepared(&s->s_shrink);
 	return s;
 }
 
