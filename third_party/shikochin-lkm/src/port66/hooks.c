@@ -17,6 +17,13 @@
 #include "core.h"
 #include "port.h"
 #include "ipc-backend.h"
+#ifdef DS_USERNS_LIVE
+#include "../userns/live.h"
+extern u32 ds_userns_ns_ioctl_original[];
+extern u32 ds_userns_mm_init_original[], ds_userns_sk_getsockopt_original[];
+#include <linux/user_namespace.h>
+#include <linux/utsname.h>
+#endif
 
 extern const struct file_operations ds_proc_ns_dir_operations;
 extern const struct inode_operations ds_proc_ns_dir_inode_operations;
@@ -44,7 +51,11 @@ struct ds_pointer_hook {
 	unsigned long *slot;
 	unsigned long saved, replacement;
 };
+#ifdef DS_USERNS_LIVE
+static struct ds_pointer_hook bpf_hooks[7];
+#else
 static struct ds_pointer_hook bpf_hooks[6];
+#endif
 
 static bool matching_cfi(unsigned long native, unsigned long replacement)
 {
@@ -86,6 +97,22 @@ static int prepare_bpf_hooks(void)
 		    !matching_cfi(fini->saved, fini->replacement))
 			return -EPROTOTYPE;
 	}
+#ifdef DS_USERNS_LIVE
+	{
+		struct ctl_table_header *header = init_user_ns.sysctls;
+		struct ctl_table_root *root;
+		struct ds_pointer_hook *hook = &bpf_hooks[6];
+		if (!header || safe_read(&root, &header->root, sizeof(root)) || !root)
+			return -EINVAL;
+		hook->slot = (void *)&root->lookup;
+		if (safe_read(&hook->saved, hook->slot, sizeof(hook->saved)) ||
+		    hook->saved != kallsyms_name_to_addr("set_lookup"))
+			return -EINVAL;
+		hook->replacement = (unsigned long)ds_userns_set_lookup;
+		if (!matching_cfi(hook->saved, hook->replacement))
+			return -EPROTOTYPE;
+	}
+#endif
 	return 0;
 }
 
@@ -110,6 +137,17 @@ DECLARE_IPC_SYSCALL(mq_notify);
 DECLARE_IPC_SYSCALL(mq_getsetattr);
 DECLARE_IPC_SYSCALL(reboot);
 DECLARE_IPC_SYSCALL(memfd_create);
+#ifdef DS_USERNS_LIVE
+DECLARE_IPC_SYSCALL(chroot);
+DECLARE_IPC_SYSCALL(newfstat);
+DECLARE_IPC_SYSCALL(newfstatat);
+DECLARE_IPC_SYSCALL(getgroups);
+DECLARE_IPC_SYSCALL(setgroups);
+DECLARE_IPC_SYSCALL(getuid);
+DECLARE_IPC_SYSCALL(geteuid);
+DECLARE_IPC_SYSCALL(getgid);
+DECLARE_IPC_SYSCALL(getegid);
+#endif
 
 struct ds_syscall_hook {
 	const char *name;
@@ -124,6 +162,11 @@ static struct ds_syscall_hook ipc_syscalls[] = {
 	IPC_SYSCALL(mq_open), IPC_SYSCALL(mq_unlink), IPC_SYSCALL(mq_timedsend),
 	IPC_SYSCALL(mq_timedreceive), IPC_SYSCALL(mq_notify), IPC_SYSCALL(mq_getsetattr),
 	IPC_SYSCALL(reboot), IPC_SYSCALL(memfd_create),
+#ifdef DS_USERNS_LIVE
+	IPC_SYSCALL(chroot),
+	IPC_SYSCALL(getgroups), IPC_SYSCALL(setgroups),
+	IPC_SYSCALL(getuid), IPC_SYSCALL(geteuid), IPC_SYSCALL(getgid), IPC_SYSCALL(getegid),
+#endif
 };
 static unsigned long *syscall_table;
 
@@ -142,11 +185,76 @@ struct ds_hook {
 	u32 saved[4];
 	u32 patch[4];
 	u32 *original;
+	unsigned int patch_words;
 };
 
-#define HOOK(name, target) { name, (unsigned long)(target), 0, { 0 }, { 0 }, NULL }
-#define HOOK_ORIGINAL(name, target, original) { name, (unsigned long)(target), 0, { 0 }, { 0 }, original }
+#define HOOK(name, target) { name, (unsigned long)(target), 0, { 0 }, { 0 }, NULL, 4 }
+#define HOOK_ORIGINAL(name, target, original) { name, (unsigned long)(target), 0, { 0 }, { 0 }, original, 4 }
 static struct ds_hook hooks[] = {
+#ifdef DS_USERNS_LIVE
+	HOOK_ORIGINAL("sk_getsockopt", ds_userns_sk_getsockopt, ds_userns_sk_getsockopt_original),
+	HOOK("netlink_recvmsg", ds_userns_netlink_recvmsg),
+	HOOK("__scm_send", ds_userns_scm_send),
+	HOOK("unix_dgram_recvmsg", ds_userns_unix_dgram_recvmsg_entry),
+	HOOK("unix_seqpacket_recvmsg", ds_userns_unix_seqpacket_recvmsg),
+	HOOK("__unix_dgram_recvmsg", ds_userns_unix_dgram_recvmsg),
+	HOOK("unix_stream_read_generic", ds_userns_unix_stream_read_generic),
+	HOOK("cgroup_init_fs_context", ds_userns_cgroup_init_fs_context),
+	HOOK("copy_cgroup_ns", ds_userns_copy_cgroup_ns),
+	HOOK("free_cgroup_ns", ds_userns_free_cgroup_ns),
+	HOOK("copy_time_ns", ds_userns_copy_time_ns),
+	HOOK("timens_put", ds_userns_timens_put),
+	HOOK("timens_install", ds_userns_timens_install),
+	HOOK("timens_on_fork", ds_userns_timens_on_fork),
+	HOOK("free_time_ns", ds_userns_free_time_ns),
+	HOOK("sysfs_init_fs_context", ds_userns_sysfs_init_fs_context),
+	HOOK_ORIGINAL("ns_ioctl", ds_userns_ns_ioctl, ds_userns_ns_ioctl_original),
+	HOOK("net_ns_get_ownership", ds_userns_net_ns_get_ownership),
+	HOOK_ORIGINAL("mm_init", ds_userns_mm_init, ds_userns_mm_init_original),
+	HOOK("__mmdrop", ds_userns_mmdrop),
+	HOOK("begin_new_exec", ds_userns_begin_new_exec),
+	HOOK("would_dump", ds_userns_would_dump),
+	HOOK("cap_task_fix_setuid", ds_userns_cap_task_fix_setuid),
+	HOOK("cap_bprm_creds_from_file", ds_userns_cap_bprm_creds_from_file),
+	HOOK("cap_inode_getsecurity", ds_userns_cap_inode_getsecurity),
+	HOOK("cap_convert_nscap", ds_userns_cap_convert_nscap),
+	HOOK("get_vfs_caps_from_disk", ds_userns_get_vfs_caps_from_disk),
+	HOOK("__arm64_sys_newfstat", __arm64_sys_ds_newfstat),
+	HOOK("__arm64_sys_newfstatat", __arm64_sys_ds_newfstatat),
+	HOOK("do_faccessat", ds_userns_do_faccessat),
+	HOOK("chown_common", ds_userns_chown_common),
+	HOOK("privileged_wrt_inode_uidgid", ds_userns_privileged_wrt_inode_uidgid),
+	HOOK("capable_wrt_inode_uidgid", ds_userns_capable_wrt_inode_uidgid),
+	HOOK("inode_owner_or_capable", ds_userns_inode_owner_or_capable),
+	HOOK("set_is_seen", ds_userns_set_is_seen),
+	HOOK("proc_pid_status", ds_userns_proc_pid_status),
+	HOOK("cp_statx", ds_userns_cp_statx),
+	HOOK("alloc_fs_context", ds_userns_alloc_fs_context),
+	HOOK("vfs_dup_fs_context", ds_userns_vfs_dup_fs_context),
+	HOOK("put_fs_context", ds_userns_put_fs_context),
+	HOOK("prepare_creds", ds_userns_prepare_creds),
+	HOOK("prepare_kernel_cred", ds_userns_prepare_kernel_cred),
+	HOOK("__put_cred", ds_userns_put_cred),
+	HOOK("put_cred_rcu", ds_userns_put_cred_rcu),
+	HOOK("copy_creds", ds_userns_copy_creds),
+	HOOK("key_change_session_keyring", ds_userns_key_change_session_keyring),
+	HOOK("alloc_ucounts", ds_un_alloc_ucounts),
+	HOOK("put_ucounts", ds_un_put_ucounts),
+	HOOK("get_ucounts", ds_un_get_ucounts),
+	HOOK("inc_ucount", ds_un_inc_ucount),
+	HOOK("dec_ucount", ds_un_dec_ucount),
+	HOOK("inc_rlimit_ucounts", ds_un_inc_rlimit_ucounts),
+	HOOK("dec_rlimit_ucounts", ds_un_dec_rlimit_ucounts),
+	HOOK("inc_rlimit_get_ucounts", ds_un_inc_rlimit_get_ucounts),
+	HOOK("dec_rlimit_put_ucounts", ds_un_dec_rlimit_put_ucounts),
+	HOOK("is_rlimit_overlimit", ds_un_is_rlimit_overlimit),
+	HOOK("copy_utsname", ds_un_copy_utsname),
+	HOOK("free_uts_ns", ds_un_free_uts_ns),
+	HOOK("proc_tgid_base_lookup", ds_userns_tgid_lookup),
+	HOOK("proc_tid_base_lookup", ds_userns_tid_lookup),
+	HOOK("proc_tgid_base_readdir", ds_userns_tgid_readdir),
+	HOOK("proc_tid_base_readdir", ds_userns_tid_readdir),
+#endif
 	HOOK_ORIGINAL("perf_event_alloc", ds_perf_event_alloc, ds_perf_alloc_original),
 	HOOK_ORIGINAL("free_event_rcu", ds_perf_free_event_rcu, ds_perf_free_original),
 	HOOK("fuse_conn_init", ds_fuse_conn_init),
@@ -180,16 +288,70 @@ static bool movable_prologue(u32 op)
 		(op & 0xff8003e0) == 0xa98003e0;
 }
 
+#ifdef DS_USERNS_LIVE
+/* HMA UID Fake 0.4.0 detours one non-argument instruction, then resumes at +4.
+ * Keep its entry and wrapper intact. The replacement starts at that resume
+ * point, so HMA still surrounds the namespace-aware capability transition.
+ * Accept only the observed SUB w8,w2,#1 / B-resume trampoline, never a general
+ * relocation of another module's prologue.
+ */
+static int setuid_chain_offset(struct ds_hook *hook)
+{
+	unsigned long stub, original, inline_hook, target;
+	u32 code[4], stub_code[2];
+	s64 delta;
+
+	if (strcmp(hook->name, "cap_task_fix_setuid") ||
+	    (hook->saved[0] & 0xfc000000) != 0x14000000)
+		return 0;
+	stub = module_kallsyms_lookup_name("hma_uidfake:uf_setuid_stub");
+	original = module_kallsyms_lookup_name("hma_uidfake:uf_setuid_orig");
+	inline_hook = module_kallsyms_lookup_name("hma_uidfake:uf_setuid_inline_hook");
+	delta = sign_extend64(hook->saved[0] & 0x03ffffff, 25) * 4;
+	target = hook->address + delta;
+	if (!stub || !original || !inline_hook || target != stub ||
+	    safe_read(code, (void *)original, sizeof(code)) ||
+	    safe_read(stub_code, (void *)stub, sizeof(stub_code)) ||
+	    code[0] != 0x51000448 || (code[1] & 0xfc000000) != 0x14000000 ||
+	    code[2] || code[3] || stub_code[0] != 0xd50324df ||
+	    (stub_code[1] & 0xfc000000) != 0x14000000 ||
+	    !matching_cfi(hook->address, hook->replacement) ||
+	    !matching_cfi(inline_hook, hook->replacement))
+		return -EOPNOTSUPP;
+	delta = sign_extend64(code[1] & 0x03ffffff, 25) * 4;
+	if (original + 4 + delta != hook->address + 4)
+		return -EOPNOTSUPP;
+	delta = sign_extend64(stub_code[1] & 0x03ffffff, 25) * 4;
+	if (stub + 4 + delta != inline_hook)
+		return -EOPNOTSUPP;
+	pr_info("preserving HMA setuid entry; replacing native resume body\n");
+	return 4;
+}
+#endif
+
 static int prepare_hook(struct ds_hook *hook)
 {
 	char symbol[KSYM_SYMBOL_LEN];
 	char *start, *end;
 	unsigned long offset, size;
+	int entry_offset = 0;
+	bool short_entry = false;
 
+	hook->patch_words = ARRAY_SIZE(hook->saved);
 	hook->address = kallsyms_name_to_addr(hook->name);
 	if (!hook->address || (hook->address & 3) ||
 	    safe_read(hook->saved, (void *)hook->address, sizeof(hook->saved)))
 		return -ENOENT;
+#ifdef DS_USERNS_LIVE
+	entry_offset = setuid_chain_offset(hook);
+	if (entry_offset < 0)
+		return entry_offset;
+	if (entry_offset) {
+		hook->address += entry_offset;
+		if (safe_read(hook->saved, (void *)hook->address, sizeof(hook->saved)))
+			return -EFAULT;
+	}
+#endif
 	/* Direct entry branches preserve the host prefix. Local direct-call-only
 	 * functions can lack a KCFI word; compare hashes only for pointer slots.
 	 */
@@ -202,8 +364,37 @@ static int prepare_hook(struct ds_hook *hook)
 		return -EINVAL;
 	start = end + 1;
 	size = simple_strtoul(start, &end, 0);
-	if (end == start || offset || size < sizeof(hook->saved))
+	if (end == start || offset != entry_offset ||
+	    size < entry_offset + sizeof(hook->saved))
 		return -EINVAL;
+	/* kallsyms size includes the next function's KCFI prefix. A short
+	 * return/tail-call may therefore leave fewer than 16 patchable bytes.
+	 */
+	{
+		unsigned int i;
+		for (i = 0; i + 1 < ARRAY_SIZE(hook->saved); i++) {
+			u32 op = hook->saved[i];
+			if ((op & 0xfffffc1f) == 0xd65f0000 ||
+			    op == 0xd65f0bff || op == 0xd65f0fff ||
+			    (op & 0xfc000000) == 0x14000000) {
+				/* A 12-byte leaf can use ADRP/ADD/BR within 4 GiB.
+				 * Keep the fourth word (often the next KCFI hash).
+				 */
+				if (i == 2 && !hook->original) {
+					short_entry = true;
+					break;
+				}
+				pr_err("short entry %s cannot hold a branch: %08x %08x %08x %08x\n",
+				       hook->name, hook->saved[0], hook->saved[1], hook->saved[2], hook->saved[3]);
+				if ((op & 0xfc000000) == 0x14000000) {
+					long delta = sign_extend64(op & 0x03ffffff, 25) * 4;
+					pr_err("entry branch destination: %pS\n",
+					       (void *)(hook->address + i * 4 + delta));
+				}
+				return -EOPNOTSUPP;
+			}
+		}
+	}
 	if (hook->original) {
 		unsigned int i;
 		for (i = 0; i < ARRAY_SIZE(hook->saved); i++) {
@@ -213,6 +404,19 @@ static int prepare_hook(struct ds_hook *hook)
 				return -EOPNOTSUPP;
 			}
 		}
+	}
+	if (short_entry) {
+		s64 pages = ((s64)(hook->replacement & PAGE_MASK) -
+			     (s64)(hook->address & PAGE_MASK)) >> PAGE_SHIFT;
+		u32 imm;
+		if (PAGE_SHIFT != 12 || pages < -(1L << 20) || pages >= (1L << 20))
+			return -ERANGE;
+		imm = (u32)pages & 0x1fffff;
+		hook->patch[0] = 0x90000010 | ((imm & 3) << 29) | ((imm >> 2) << 5);
+		hook->patch[1] = 0x91000210 | ((hook->replacement & 0xfff) << 10);
+		hook->patch[2] = 0xd61f0200;
+		hook->patch_words = 3;
+		return 0;
 	}
 	/* ldr x16, .+8; br x16; .quad destination. CFI type prefixes stay intact. */
 	hook->patch[0] = 0x58000050;
@@ -227,7 +431,7 @@ static int write_hook(struct ds_hook *hook, bool restore)
 	unsigned int i;
 	int ret;
 
-	for (i = 0; i < ARRAY_SIZE(hook->saved); i++) {
+	for (i = 0; i < hook->patch_words; i++) {
 		ret = aarch64_insn_patch_text_nosync((void *)(hook->address + i * 4),
 					 restore ? hook->saved[i] : hook->patch[i]);
 		if (ret)
@@ -285,6 +489,9 @@ static int install_stopped(void *unused)
 			goto rollback;
 		}
 	}
+#ifdef DS_USERNS_LIVE
+	WRITE_ONCE(init_user_ns.ns.ops, &userns_operations);
+#endif
 	return 0;
 
 rollback:
