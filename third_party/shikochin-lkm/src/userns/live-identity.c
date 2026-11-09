@@ -9,7 +9,16 @@
 #include <linux/sched.h>
 #include <linux/sched/user.h>
 #include <linux/uaccess.h>
-#include <trace/hooks/sys.h>
+
+/* The hummer 6.6 vendor tree does not export the Android 6.12
+ * trace_android_vh_security_audit_log_setid hook.  Keep the set-ID paths
+ * otherwise identical and drop only the vendor audit side channel. */
+static inline void ds_audit_log_setid(int type, u32 old_id, u32 new_id)
+{
+	(void)type;
+	(void)old_id;
+	(void)new_id;
+}
 long ds_identity_setregid(gid_t rgid, gid_t egid)
 {
 	struct user_namespace *ns = current_user_ns();
@@ -59,7 +68,7 @@ long ds_identity_setregid(gid_t rgid, gid_t egid)
 	if (retval < 0)
 		goto error;
 
-	trace_android_vh_security_audit_log_setid(4, old->gid.val, new->gid.val);
+	ds_audit_log_setid(4, old->gid.val, new->gid.val);
 
 	return commit_creds(new);
 
@@ -107,7 +116,7 @@ long ds_identity_setgid(gid_t gid)
 	if (retval < 0)
 		goto error;
 
-	trace_android_vh_security_audit_log_setid(3, old->gid.val, gid);
+	ds_audit_log_setid(3, old->gid.val, gid);
 
 	return commit_creds(new);
 
@@ -228,7 +237,7 @@ long ds_identity_setreuid(uid_t ruid, uid_t euid)
 	if (retval < 0)
 		goto error;
 
-	trace_android_vh_security_audit_log_setid(1, old->uid.val, new->uid.val);
+	ds_audit_log_setid(1, old->uid.val, new->uid.val);
 
 	flag_nproc_exceeded(new);
 	return commit_creds(new);
@@ -293,7 +302,7 @@ long ds_identity_setuid(uid_t uid)
 	if (retval < 0)
 		goto error;
 
-	trace_android_vh_security_audit_log_setid(0, old->uid.val, uid);
+	ds_audit_log_setid(0, old->uid.val, uid);
 
 	flag_nproc_exceeded(new);
 	return commit_creds(new);
@@ -380,7 +389,7 @@ long ds_identity_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 	if (retval < 0)
 		goto error;
 
-	trace_android_vh_security_audit_log_setid(2, old->uid.val, new->uid.val);
+	ds_audit_log_setid(2, old->uid.val, new->uid.val);
 
 	flag_nproc_exceeded(new);
 	return commit_creds(new);
@@ -472,7 +481,7 @@ long ds_identity_setresgid(gid_t rgid, gid_t egid, gid_t sgid)
 	if (retval < 0)
 		goto error;
 
-	trace_android_vh_security_audit_log_setid(5, old->gid.val, new->gid.val);
+	ds_audit_log_setid(5, old->gid.val, new->gid.val);
 
 	return commit_creds(new);
 
@@ -555,7 +564,7 @@ SYSCALL_DEFINE1(ds_setfsuid, uid_t, uid)
 }
 
 /*
- * Samma på svenska..
+ * Samma p氓 svenska..
  */
 long ds_identity_setfsgid(gid_t gid)
 {
@@ -597,4 +606,5 @@ SYSCALL_DEFINE1(ds_setfsgid, gid_t, gid)
 {
 	return ds_identity_setfsgid(gid);
 }
+
 

@@ -42,7 +42,7 @@ ifeq ($(USERNS66),1)
 droidspaces_ns-y += src/userns/user_namespace.o src/userns/credentials.o src/userns/utsname.o \
 	src/userns/live-credentials.o src/userns/live-ucounts.o src/userns/live-proc.o \
 	src/userns/live-syscalls.o src/userns/live-groups.o src/userns/live-stat.o \
-	src/userns/live-capabilities.o src/userns/live-proc-status.o src/userns/live-nsfs.o \
+	src/userns/live-capabilities.o src/userns/live-identity.o src/userns/live-proc-status.o src/userns/live-nsfs.o \
 	src/userns/nsfs-original.o src/userns/live-vfs.o src/userns/live-exec.o \
 	src/userns/live-mm.o src/userns/mm-original.o src/userns/live-fs-context.o \
 	src/userns/live-sock.o src/userns/sock-original.o src/userns/live-scm.o \

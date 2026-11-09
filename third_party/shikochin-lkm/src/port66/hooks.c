@@ -140,6 +140,16 @@ DECLARE_IPC_SYSCALL(memfd_create);
 DECLARE_IPC_SYSCALL(chroot);
 DECLARE_IPC_SYSCALL(newfstat);
 DECLARE_IPC_SYSCALL(newfstatat);
+DECLARE_IPC_SYSCALL(setregid);
+DECLARE_IPC_SYSCALL(setgid);
+DECLARE_IPC_SYSCALL(setreuid);
+DECLARE_IPC_SYSCALL(setuid);
+DECLARE_IPC_SYSCALL(setresuid);
+DECLARE_IPC_SYSCALL(getresuid);
+DECLARE_IPC_SYSCALL(setresgid);
+DECLARE_IPC_SYSCALL(getresgid);
+DECLARE_IPC_SYSCALL(setfsuid);
+DECLARE_IPC_SYSCALL(setfsgid);
 DECLARE_IPC_SYSCALL(getgroups);
 DECLARE_IPC_SYSCALL(setgroups);
 DECLARE_IPC_SYSCALL(getuid);
@@ -163,6 +173,11 @@ static struct ds_syscall_hook ipc_syscalls[] = {
 	IPC_SYSCALL(reboot), IPC_SYSCALL(memfd_create),
 #ifdef DS_USERNS_LIVE
 	IPC_SYSCALL(chroot),
+	IPC_SYSCALL(setregid), IPC_SYSCALL(setgid),
+	IPC_SYSCALL(setreuid), IPC_SYSCALL(setuid),
+	IPC_SYSCALL(setresuid), IPC_SYSCALL(getresuid),
+	IPC_SYSCALL(setresgid), IPC_SYSCALL(getresgid),
+	IPC_SYSCALL(setfsuid), IPC_SYSCALL(setfsgid),
 	IPC_SYSCALL(getgroups), IPC_SYSCALL(setgroups),
 	IPC_SYSCALL(getuid), IPC_SYSCALL(geteuid), IPC_SYSCALL(getgid), IPC_SYSCALL(getegid),
 #endif
