@@ -14,58 +14,6 @@
 
 #define fuse_do_setattr ds_userns_fuse_do_setattr
 
-static bool update_mtime(unsigned ivalid, bool trust_local_mtime)
-{
-	/* Always update if mtime is explicitly set */
-	if (ivalid & ATTR_MTIME_SET)
-		return true;
-
-	/* Or if kernel i_mtime is the official one */
-	if (trust_local_mtime)
-		return true;
-
-	/* If it's an open(O_TRUNC) or an ftruncate(), don't update */
-	if ((ivalid & ATTR_SIZE) && (ivalid & (ATTR_OPEN | ATTR_FILE)))
-		return false;
-
-	/* In all other cases update */
-	return true;
-}
-
-static void iattr_to_fattr(struct fuse_conn *fc, struct iattr *iattr,
-			   struct fuse_setattr_in *arg, bool trust_local_cmtime)
-{
-	unsigned ivalid = iattr->ia_valid;
-
-	if (ivalid & ATTR_MODE)
-		arg->valid |= FATTR_MODE,   arg->mode = iattr->ia_mode;
-	if (ivalid & ATTR_UID)
-		arg->valid |= FATTR_UID,    arg->uid = from_kuid(fc->user_ns, iattr->ia_uid);
-	if (ivalid & ATTR_GID)
-		arg->valid |= FATTR_GID,    arg->gid = from_kgid(fc->user_ns, iattr->ia_gid);
-	if (ivalid & ATTR_SIZE)
-		arg->valid |= FATTR_SIZE,   arg->size = iattr->ia_size;
-	if (ivalid & ATTR_ATIME) {
-		arg->valid |= FATTR_ATIME;
-		arg->atime = iattr->ia_atime.tv_sec;
-		arg->atimensec = iattr->ia_atime.tv_nsec;
-		if (!(ivalid & ATTR_ATIME_SET))
-			arg->valid |= FATTR_ATIME_NOW;
-	}
-	if ((ivalid & ATTR_MTIME) && update_mtime(ivalid, trust_local_cmtime)) {
-		arg->valid |= FATTR_MTIME;
-		arg->mtime = iattr->ia_mtime.tv_sec;
-		arg->mtimensec = iattr->ia_mtime.tv_nsec;
-		if (!(ivalid & ATTR_MTIME_SET) && !trust_local_cmtime)
-			arg->valid |= FATTR_MTIME_NOW;
-	}
-	if ((ivalid & ATTR_CTIME) && trust_local_cmtime) {
-		arg->valid |= FATTR_CTIME;
-		arg->ctime = iattr->ia_ctime.tv_sec;
-		arg->ctimensec = iattr->ia_ctime.tv_nsec;
-	}
-}
-
 static void __fuse_release_nowrite(struct inode *inode)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
