@@ -32,6 +32,18 @@ su -c 'mkdir -p /data/adb/droidspaces_hummer; touch /data/adb/droidspaces_hummer
 su -c 'sh /data/adb/modules/droidspaces_hummer/service.sh reset'
 ```
 
+## WebUI
+
+模块包含 `webroot/`，在 KernelSU / APatch 的模块页面点 **打开 WebUI** 即可：
+
+- 显示 namespace 是否激活、内核 / 目标 release、USER_NS 变体状态、
+  原生 USER_NS 检测、blocked 状态；
+- 按钮：刷新、重试加载（reset + load）、清空日志；
+- 日志读取 `/data/adb/droidspaces_hummer/load.log`。
+
+WebUI 通过 KernelSU 的 `ksu.exec` 调用 `service.sh`；没有 WebUI API 的
+管理器会提示不可用，不影响命令行加载。
+
 ## 不能和 phDroid 同时用
 
 两套模块都会接管 PID / IPC namespace。安装器检测到已启用的 phDroid 会直接

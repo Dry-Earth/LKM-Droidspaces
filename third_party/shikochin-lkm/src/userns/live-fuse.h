@@ -3,12 +3,17 @@
 #define DS_USERNS_LIVE_FUSE_H
 #include "fs/fuse/fuse_i.h"
 struct fs_parameter;
+#ifdef DS_USERNS_66
+struct fuse_req *ds_userns_fuse_get_req(struct fuse_mount *, bool);
+void ds_userns_fuse_fillattr(struct inode *, struct fuse_attr *, struct kstat *);
+#else
 struct fuse_req *ds_userns_fuse_get_req(struct mnt_idmap *, struct fuse_mount *, bool);
 ssize_t ds_userns_fuse_simple_request(struct mnt_idmap *, struct fuse_mount *, struct fuse_args *);
+void ds_userns_fuse_fillattr(struct mnt_idmap *, struct inode *, struct fuse_attr *, struct kstat *);
+#endif
 int ds_userns_fuse_parse_param(struct fs_context *, struct fs_parameter *);
 int ds_userns_fuse_show_options(struct seq_file *, struct dentry *);
 void ds_userns_fuse_change_attributes_common(struct inode *, struct fuse_attr *, struct fuse_statx *, u64, u32);
-void ds_userns_fuse_fillattr(struct mnt_idmap *, struct inode *, struct fuse_attr *, struct kstat *);
 bool ds_userns_fuse_allow_current_process(struct fuse_conn *);
 int ds_userns_fuse_do_setattr(struct mnt_idmap *, struct dentry *, struct iattr *, struct file *);
 int ds_userns_fuse_get_create_ext(struct mnt_idmap *, struct fuse_args *, struct inode *, struct dentry *, umode_t);
