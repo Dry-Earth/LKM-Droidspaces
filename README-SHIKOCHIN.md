@@ -47,13 +47,15 @@ mount namespace 内部接口。6.6 版本目前只移植了**核心子集**：
   setuid/setgid/setresuid/setfsuid/setgroups（含 LSM fix-setid 路径）、
   exec/mm 凭据、stat/faccessat/chown、cgroup/time/sysfs、socket/scm/unix/netlink、
   superblock 所有权（alloc_super/sget/destroy）、mount namespace 所有权
-  （alloc_mnt_ns/free_mnt_ns/mnt_may_suid）；
-- 仍排除：`live-fuse*.c`（FUSE idmapping 内部）和 6.8+ 才有的
-  `statmount/listmount` 系统调用。
+  （alloc_mnt_ns/free_mnt_ns/mnt_may_suid）、FUSE 核心映射
+  （mount 选项 / 请求凭据 / inode uid-gid / chown setattr / allow_other 检查）；
+- 仍排除：FUSE POSIX ACL 映射、FUSE passthrough（INIT 标志剥离）以及 6.8+
+  才有的 `statmount/listmount` 系统调用。
 
-因此 6.6 的 userns 变体**不是安全边界**：FUSE 和 statmount 仍未接管，
-容器内的 FUSE 挂载行为可能与原生 USER_NS 内核不同。需要真正隔离时优先走
-原生内核路线（`hummer-lineage-kernel-build` 的 v3+USER_NS boot.img）。
+因此 6.6 的 userns 变体**不是安全边界**：FUSE ACL / passthrough 和
+statmount 仍未接管，容器内的 FUSE 挂载行为可能与原生 USER_NS 内核不同。
+需要真正隔离时优先走原生内核路线（`hummer-lineage-kernel-build` 的
+v3+USER_NS boot.img）。
 
 netfilter 仍然直接携带 6.12 的 `nf_tables` 快照，6.6 默认不构建。
 
@@ -137,7 +139,8 @@ OTA 模式流程（与 phDroid 的 OTA 工作流一致）：
 ## 4. 安装与验证
 
 1. KernelSU / KernelSU Next / SUKISU → 模块 → 安装 ZIP。
-2. 重启。首次安装**不会自动加载**。
+2. 重启。首次安装**不会自动加载**。模块页面点 **打开 WebUI** 可以查看状态、
+   重试加载、清空日志（也可以继续用下面的命令行）。
 3. 手动加载：
 
 ```sh
@@ -247,8 +250,8 @@ userns=0       # USER_NS 变体（需 droidspaces_ns_userns.ko）；默认关闭
 
 - 本移植**还没有在 hummer 真机上验证**；当前只完成源码集成、精确 KDIR 构建链和
   KernelSU 打包。第一次安装请保留手动加载，先看 `load.log`。
-- USER_NS 6.6 变体只覆盖核心子集，**不是安全沙箱**：FUSE idmapping 和
-  statmount/listmount 仍未接管；不要把不可信进程放进去。
+- USER_NS 6.6 变体只覆盖核心子集，**不是安全沙箱**：FUSE ACL / passthrough
+  和 statmount/listmount 仍未接管；不要把不可信进程放进去。
 - 原生 USER_NS 内核（v3+USER_NS boot.img）与 LKM userns 变体**不能同时使用**；
   加载器检测到 `/proc/self/uid_map` 已存在会直接拒绝。
 - netfilter 是 6.12 `nf_tables` 快照，6.6 默认不构建；需要 Docker NAT/nftables
