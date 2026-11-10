@@ -882,8 +882,7 @@ bool ds_userns_mnt_may_suid(struct vfsmount *mnt)
 
 /* 6.6 has no mount-namespace tree, mnt_ns_release or statmount/listmount.
  * Keep the native lifecycle and repair only the user_namespace transfers
- * that CONFIG_USER_NS=n compiled away. */
-#include "mount.h"
+ * that CONFIG_USER_NS=n compiled away.  pnode.h already pulled in mount.h. */
 #define alloc_mnt_ns ds_userns_alloc_mnt_ns
 #define free_mnt_ns ds_userns_free_mnt_ns
 
