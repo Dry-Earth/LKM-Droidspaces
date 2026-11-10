@@ -44,14 +44,16 @@ ci/package-shikochin-hummer.py      # 生成 KernelSU ZIP
 mount namespace 内部接口。6.6 版本目前只移植了**核心子集**：
 
 - 已包含：userns/cred/ucounts/utsname、proc uid_map/gid_map、capabilities、
-  exec/mm 凭据、stat/faccessat/chown、cgroup/time/sysfs、socket/scm/unix/netlink；
-- 仍排除：`live-mount.c`（6.12 mount-ns / statmount 内部）、`live-super.c`
-  （6.12 shrinker API）、`live-identity.c`（6.12 audit trace hook）、
-  `live-fuse*.c`（6.12 FUSE 内部）。
+  setuid/setgid/setresuid/setfsuid/setgroups（含 LSM fix-setid 路径）、
+  exec/mm 凭据、stat/faccessat/chown、cgroup/time/sysfs、socket/scm/unix/netlink、
+  superblock 所有权（alloc_super/sget/destroy）、mount namespace 所有权
+  （alloc_mnt_ns/free_mnt_ns/mnt_may_suid）；
+- 仍排除：`live-fuse*.c`（FUSE idmapping 内部）和 6.8+ 才有的
+  `statmount/listmount` 系统调用。
 
-因此 6.6 的 userns 变体**不是安全边界**：`setuid/setgid` 等 identity 系统调用
-尚未接管，不要把不可信进程放进容器当作隔离。需要真正隔离时优先走原生内核
-路线（`hummer-lineage-kernel-build` 的 v3+USER_NS boot.img）。
+因此 6.6 的 userns 变体**不是安全边界**：FUSE 和 statmount 仍未接管，
+容器内的 FUSE 挂载行为可能与原生 USER_NS 内核不同。需要真正隔离时优先走
+原生内核路线（`hummer-lineage-kernel-build` 的 v3+USER_NS boot.img）。
 
 netfilter 仍然直接携带 6.12 的 `nf_tables` 快照，6.6 默认不构建。
 
@@ -245,8 +247,8 @@ userns=0       # USER_NS 变体（需 droidspaces_ns_userns.ko）；默认关闭
 
 - 本移植**还没有在 hummer 真机上验证**；当前只完成源码集成、精确 KDIR 构建链和
   KernelSU 打包。第一次安装请保留手动加载，先看 `load.log`。
-- USER_NS 6.6 变体只覆盖核心子集，**不是安全沙箱**：identity 系统调用
-  （setuid/setgid 等）、mount namespace 和 FUSE 仍未接管；不要把不可信进程放进去。
+- USER_NS 6.6 变体只覆盖核心子集，**不是安全沙箱**：FUSE idmapping 和
+  statmount/listmount 仍未接管；不要把不可信进程放进去。
 - 原生 USER_NS 内核（v3+USER_NS boot.img）与 LKM userns 变体**不能同时使用**；
   加载器检测到 `/proc/self/uid_map` 已存在会直接拒绝。
 - netfilter 是 6.12 `nf_tables` 快照，6.6 默认不构建；需要 Docker NAT/nftables
