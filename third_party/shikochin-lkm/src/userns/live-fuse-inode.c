@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* FUSE user-namespace paths from the pinned android16-6.12 DDK.
- * Copyright (C) 2001-2008 Miklos Szeredi <miklos@szeredi.hu>
+/* FUSE inode attribute mapping for the hummer 6.6 tree.
+ * Recompiled so make_kuid()/make_kgid() perform real user-namespace
+ * conversion instead of the CONFIG_USER_NS=n identity stubs.
  */
 #include "fs/fuse/fuse_i.h"
 #include <linux/file.h>
@@ -10,16 +11,18 @@
 
 #include <linux/pagemap.h>
 #include <linux/posix_acl.h>
+
 #define fuse_change_attributes_common ds_userns_fuse_change_attributes_common
 #define fuse_fillattr ds_userns_fuse_fillattr
+
 static ino_t fuse_squash_ino(u64 ino64)
 {
 	ino_t ino = (ino_t) ino64;
+
 	if (sizeof(ino_t) < sizeof(u64))
 		ino ^= ino64 >> (sizeof(u64) - sizeof(ino_t)) * 8;
 	return ino;
 }
-
 
 void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 				   struct fuse_statx *sx,
@@ -60,13 +63,6 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 		sx->btime.tv_nsec =
 			min_t(u32, sx->btime.tv_nsec, NSEC_PER_SEC - 1);
 
-		/*
-		 * Btime has been queried, cache is valid (whether or not btime
-		 * is available or not) so clear STATX_BTIME from inval_mask.
-		 *
-		 * Availability of the btime attribute is indicated in
-		 * FUSE_I_BTIME
-		 */
 		set_mask_bits(&fi->inval_mask, STATX_BTIME, 0);
 		if (sx->mask & STATX_BTIME) {
 			set_bit(FUSE_I_BTIME, &fi->state);
@@ -102,23 +98,18 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 	inode->i_flags &= ~S_NOSEC;
 }
 
-
-void fuse_fillattr(struct mnt_idmap *idmap, struct inode *inode,
-			  struct fuse_attr *attr, struct kstat *stat)
+void fuse_fillattr(struct inode *inode, struct fuse_attr *attr,
+		   struct kstat *stat)
 {
 	unsigned int blkbits;
 	struct fuse_conn *fc = get_fuse_conn(inode);
-	vfsuid_t vfsuid = make_vfsuid(idmap, fc->user_ns,
-				      make_kuid(fc->user_ns, attr->uid));
-	vfsgid_t vfsgid = make_vfsgid(idmap, fc->user_ns,
-				      make_kgid(fc->user_ns, attr->gid));
 
 	stat->dev = inode->i_sb->s_dev;
 	stat->ino = attr->ino;
 	stat->mode = (inode->i_mode & S_IFMT) | (attr->mode & 07777);
 	stat->nlink = attr->nlink;
-	stat->uid = vfsuid_into_kuid(vfsuid);
-	stat->gid = vfsgid_into_kgid(vfsgid);
+	stat->uid = make_kuid(fc->user_ns, attr->uid);
+	stat->gid = make_kgid(fc->user_ns, attr->gid);
 	stat->rdev = inode->i_rdev;
 	stat->atime.tv_sec = attr->atime;
 	stat->atime.tv_nsec = attr->atimensec;

@@ -25,6 +25,7 @@ PAYLOADS = {
 }
 MODULE_FILES = ('module.prop', 'common.sh', 'customize.sh', 'post-fs-data.sh',
                 'service.sh', 'config.conf', 'skip_mount', 'README.md')
+WEBUI_FILES = ('webroot/index.html', 'webroot/main.js')
 
 
 def sha(data: bytes) -> str:
@@ -79,7 +80,7 @@ def main() -> None:
         raise SystemExit('the namespace payload is mandatory')
 
     template = args.template
-    for name in MODULE_FILES + ('META-INF/com/google/android/update-binary',
+    for name in MODULE_FILES + WEBUI_FILES + ('META-INF/com/google/android/update-binary',
                                 'META-INF/com/google/android/updater-script'):
         if not (template / name).is_file():
             raise SystemExit(f'template file missing: {name}')
@@ -93,7 +94,7 @@ def main() -> None:
     (stage / 'META-INF/com/google/android').mkdir(parents=True)
 
     files = {}
-    for name in MODULE_FILES:
+    for name in MODULE_FILES + WEBUI_FILES:
         files[name] = (template / name).read_bytes()
     for rel in ('META-INF/com/google/android/update-binary',
                 'META-INF/com/google/android/updater-script'):

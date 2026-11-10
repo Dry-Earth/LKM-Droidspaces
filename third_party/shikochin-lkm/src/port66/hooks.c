@@ -21,6 +21,15 @@
 #include "../userns/live.h"
 extern u32 ds_userns_mm_init_original[], ds_userns_sk_getsockopt_original[];
 extern u32 ds_userns_alloc_mnt_ns_original[];
+extern int ds_userns_fuse_parse_param(struct fs_context *, struct fs_parameter *);
+extern int ds_userns_fuse_show_options(struct seq_file *, struct dentry *);
+extern struct fuse_req *ds_userns_fuse_get_req(struct fuse_mount *, bool);
+extern void ds_userns_fuse_force_creds(struct fuse_req *);
+extern void ds_userns_fuse_change_attributes_common(struct inode *,
+	struct fuse_attr *, struct fuse_statx *, u64, u32);
+extern void ds_userns_fuse_fillattr(struct inode *, struct fuse_attr *,
+	struct kstat *);
+extern bool ds_userns_fuse_allow_current_process(struct fuse_conn *);
 #include <linux/user_namespace.h>
 #include <linux/utsname.h>
 #endif
@@ -207,6 +216,13 @@ struct ds_hook {
 #define HOOK_ORIGINAL(name, target, original) { name, (unsigned long)(target), 0, { 0 }, { 0 }, original, 4 }
 static struct ds_hook hooks[] = {
 #ifdef DS_USERNS_LIVE
+	HOOK("fuse_parse_param", ds_userns_fuse_parse_param),
+	HOOK("fuse_show_options", ds_userns_fuse_show_options),
+	HOOK("fuse_get_req", ds_userns_fuse_get_req),
+	HOOK("fuse_force_creds", ds_userns_fuse_force_creds),
+	HOOK("fuse_change_attributes_common", ds_userns_fuse_change_attributes_common),
+	HOOK("fuse_fillattr", ds_userns_fuse_fillattr),
+	HOOK("fuse_allow_current_process", ds_userns_fuse_allow_current_process),
 	HOOK_ORIGINAL("sk_getsockopt", ds_userns_sk_getsockopt, ds_userns_sk_getsockopt_original),
 	HOOK("netlink_recvmsg", ds_userns_netlink_recvmsg),
 	HOOK("__scm_send", ds_userns_scm_send),

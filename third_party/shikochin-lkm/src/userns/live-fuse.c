@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* FUSE user-namespace paths from the pinned android16-6.12 DDK.
- * Copyright (C) 2001-2008 Miklos Szeredi <miklos@szeredi.hu>
+/* FUSE user-namespace option parsing for the hummer 6.6 tree.
+ * Recompiled from fs/fuse/inode.c so make_kuid()/from_kuid_munged()
+ * perform real user-namespace mapping instead of the USER_NS=n stubs.
  */
 #include "fs/fuse/fuse_i.h"
 #include <linux/file.h>
@@ -12,11 +13,12 @@
 #include <linux/fs_parser.h>
 #include <linux/seq_file.h>
 #include <linux/filter.h>
+#include <linux/cred.h>
+#include <linux/bpf.h>
+#include <uapi/linux/magic.h>
+
 #define FUSE_DEFAULT_BLKSIZE 512
-extern int ds_userns_fuse_get_tree_original(struct fs_context *);
-extern void ds_fuse_conn_init(struct fuse_conn *, struct fuse_mount *,
-    struct user_namespace *, const struct fuse_iqueue_ops *, void *);
-extern const struct fuse_iqueue_ops ds_userns_fuse_iq_ops;
+
 enum {
 	OPT_SOURCE,
 	OPT_SUBTYPE,
@@ -60,13 +62,8 @@ int ds_userns_fuse_parse_param(struct fs_context *fsc, struct fs_parameter *para
 	kgid_t kgid;
 
 	if (fsc->purpose == FS_CONTEXT_FOR_RECONFIGURE) {
-		/*
-		 * Ignore options coming from mount(MS_REMOUNT) for backward
-		 * compatibility.
-		 */
 		if (fsc->oldapi)
 			return 0;
-
 		return invalfc(fsc, "No changes allowed in reconfigure");
 	}
 
@@ -74,7 +71,8 @@ int ds_userns_fuse_parse_param(struct fs_context *fsc, struct fs_parameter *para
 	if (opt < 0)
 		return opt;
 
-	/* Android BPF backing is retained for host mounts only. */
+	/* Android BPF backing / daemonless mounts cannot be owned by a child
+	 * user namespace; reject them before touching those objects. */
 	if (fsc->user_ns != &init_user_ns &&
 	    (opt == OPT_ROOT_BPF || opt == OPT_ROOT_DIR || opt == OPT_NO_DAEMON))
 		return -EOPNOTSUPP;
@@ -107,11 +105,9 @@ int ds_userns_fuse_parse_param(struct fs_context *fsc, struct fs_parameter *para
 		break;
 
 	case OPT_USER_ID:
-		kuid = make_kuid(current_user_ns(), result.uint_32);
-		/*
-		 * The requested uid must be representable in the
-		 * filesystem's idmapping.
-		 */
+		kuid = make_kuid(fsc->user_ns, result.uint_32);
+		if (!uid_valid(kuid))
+			return invalfc(fsc, "Invalid user_id");
 		if (!kuid_has_mapping(fsc->user_ns, kuid))
 			return invalfc(fsc, "Invalid user_id");
 		ctx->user_id = kuid;
@@ -119,11 +115,9 @@ int ds_userns_fuse_parse_param(struct fs_context *fsc, struct fs_parameter *para
 		break;
 
 	case OPT_GROUP_ID:
-		kgid = make_kgid(current_user_ns(), result.uint_32);
-		/*
-		 * The requested gid must be representable in the
-		 * filesystem's idmapping.
-		 */
+		kgid = make_kgid(fsc->user_ns, result.uint_32);
+		if (!gid_valid(kgid))
+			return invalfc(fsc, "Invalid group_id");
 		if (!kgid_has_mapping(fsc->user_ns, kgid))
 			return invalfc(fsc, "Invalid group_id");
 		ctx->group_id = kgid;
@@ -157,11 +151,19 @@ int ds_userns_fuse_parse_param(struct fs_context *fsc, struct fs_parameter *para
 		}
 		break;
 
-	case OPT_ROOT_DIR:
-		ctx->root_dir = fget(result.uint_32);
-		if (!ctx->root_dir)
+	case OPT_ROOT_DIR: {
+		struct file *rd = fget(result.uint_32);
+
+		if (!rd)
 			return invalfc(fsc, "Unable to open root directory");
+		if (rd->f_inode->i_sb->s_magic == FUSE_SUPER_MAGIC ||
+		    rd->f_inode->i_sb->s_stack_depth >= FILESYSTEM_MAX_STACK_DEPTH) {
+			fput(rd);
+			return invalfc(fsc, "Invalid root directory (FUSE or too deep)");
+		}
+		ctx->root_dir = rd;
 		break;
+	}
 
 	case OPT_NO_DAEMON:
 		ctx->no_daemon = true;
@@ -174,6 +176,7 @@ int ds_userns_fuse_parse_param(struct fs_context *fsc, struct fs_parameter *para
 
 	return 0;
 }
+
 int ds_userns_fuse_show_options(struct seq_file *m, struct dentry *root)
 {
 	struct super_block *sb = root->d_sb;
@@ -204,108 +207,29 @@ int ds_userns_fuse_show_options(struct seq_file *m, struct dentry *root)
 
 	return 0;
 }
-static int fuse_fill_super(struct super_block *sb, struct fs_context *fsc)
+
+static bool fuse_permissible_uidgid(struct fuse_conn *fc)
 {
-	struct fuse_fs_context *ctx = fsc->fs_private;
-	int err;
+	const struct cred *cred = current_cred();
 
-	if (!ctx->no_daemon) {
-		if (!ctx->file || !ctx->rootmode_present ||
-		    !ctx->user_id_present || !ctx->group_id_present)
-			return -EINVAL;
-
-		/*
-		 * Require mount to happen from the same user namespace which
-		 * opened /dev/fuse to prevent potential attacks.
-		 */
-		if ((ctx->file->f_op != &fuse_dev_operations) ||
-		    (ctx->file->f_cred->user_ns != sb->s_user_ns))
-			return -EINVAL;
-		ctx->fudptr = &ctx->file->private_data;
-	}
-
-	err = fuse_fill_super_common(sb, ctx);
-	if (err)
-		return err;
-	/* file->private_data shall be visible on all CPUs after this */
-	smp_mb();
-	fuse_send_init(get_fuse_mount_super(sb));
-	return 0;
+	return (uid_eq(cred->euid, fc->user_id) &&
+		uid_eq(cred->suid, fc->user_id) &&
+		uid_eq(cred->uid,  fc->user_id) &&
+		gid_eq(cred->egid, fc->group_id) &&
+		gid_eq(cred->sgid, fc->group_id) &&
+		gid_eq(cred->gid,  fc->group_id));
 }
-static int fuse_set_no_super(struct super_block *sb, struct fs_context *fsc)
+
+bool ds_userns_fuse_allow_current_process(struct fuse_conn *fc)
 {
-	return -ENOTCONN;
-}
-static int fuse_test_super(struct super_block *sb, struct fs_context *fsc)
-{
+	bool allow;
 
-	return fsc->sget_key == get_fuse_conn_super(sb);
-}
-int ds_userns_fuse_get_tree(struct fs_context *fsc)
-{
-	struct fuse_fs_context *ctx = fsc->fs_private;
-	struct fuse_dev *fud;
-	struct fuse_conn *fc;
-	struct fuse_mount *fm;
-	struct super_block *sb;
-	int err;
+	if (fc->allow_other)
+		allow = current_in_userns(fc->user_ns);
+	else
+		allow = fuse_permissible_uidgid(fc);
 
-	/* Preserve the native host ABI, including its eliminated x2 argument. */
-	if (fsc->user_ns == &init_user_ns)
-		return ds_userns_fuse_get_tree_original(fsc);
-	if (ctx->is_bdev || ctx->no_daemon || ctx->root_dir || ctx->root_bpf)
-		return -EOPNOTSUPP;
-
-	fc = kmalloc(sizeof(*fc), GFP_KERNEL);
-	if (!fc)
-		return -ENOMEM;
-
-	fm = kzalloc(sizeof(*fm), GFP_KERNEL);
-	if (!fm) {
-		kfree(fc);
-		return -ENOMEM;
-	}
-
-	ds_fuse_conn_init(fc, fm, &init_user_ns, &ds_userns_fuse_iq_ops, NULL);
-	/* Only this ported caller supplies a live, explicitly owned namespace. */
-	fc->user_ns = get_user_ns(fsc->user_ns);
-	fc->release = fuse_free_conn;
-
-	fsc->s_fs_info = fm;
-
-	if (ctx->fd_present)
-		ctx->file = fget(ctx->fd);
-
-	if (IS_ENABLED(CONFIG_BLOCK) && ctx->is_bdev) {
-		err = get_tree_bdev(fsc, fuse_fill_super);
-		goto out;
-	}
-	/*
-	 * While block dev mount can be initialized with a dummy device fd
-	 * (found by device name), normal fuse mounts can't
-	 */
-	err = -EINVAL;
-	if (!ctx->file)
-		goto out;
-
-	/*
-	 * Allow creating a fuse mount with an already initialized fuse
-	 * connection
-	 */
-	fud = READ_ONCE(ctx->file->private_data);
-	if (ctx->file->f_op == &fuse_dev_operations && fud) {
-		fsc->sget_key = fud->fc;
-		sb = sget_fc(fsc, fuse_test_super, fuse_set_no_super);
-		err = PTR_ERR_OR_ZERO(sb);
-		if (!IS_ERR(sb))
-			fsc->root = dget(sb->s_root);
-	} else {
-		err = get_tree_nodev(fsc, fuse_fill_super);
-	}
-out:
-	if (fsc->s_fs_info)
-		fuse_mount_destroy(fm);
-	if (ctx->file)
-		fput(ctx->file);
-	return err;
+	/* The native CAP_SYS_ADMIN bypass targets the initial namespace only;
+	 * leave it off for the LKM so a child namespace cannot gain it. */
+	return allow;
 }

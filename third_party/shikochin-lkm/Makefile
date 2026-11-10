@@ -47,7 +47,8 @@ droidspaces_ns-y += src/userns/user_namespace.o src/userns/credentials.o src/use
 	src/userns/live-mm.o src/userns/mm-original.o src/userns/live-fs-context.o \
 	src/userns/live-sock.o src/userns/sock-original.o src/userns/live-scm.o \
 	src/userns/live-unix.o src/userns/live-netlink.o src/userns/live-cgroup.o \
-	src/userns/live-time.o src/userns/live-sysfs.o
+	src/userns/live-time.o src/userns/live-sysfs.o \
+	src/userns/live-fuse.o src/userns/live-fuse-request.o src/userns/live-fuse-inode.o
 ccflags-y += -DCONFIG_USER_NS=1 -DDS_USERNS_LIVE=1 -DDS_USERNS_66=1
 ccflags-y += -include $(src)/src/userns/live-names.h
 LINUXINCLUDE := -I$(src)/src/userns/compat66 $(LINUXINCLUDE)
