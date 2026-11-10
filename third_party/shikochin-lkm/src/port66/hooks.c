@@ -28,6 +28,8 @@ extern void ds_userns_fuse_change_attributes_common(struct inode *,
 	struct fuse_attr *, struct fuse_statx *, u64, u32);
 extern void ds_userns_fuse_fillattr(struct inode *, struct fuse_attr *,
 	struct kstat *);
+extern int ds_userns_fuse_do_setattr(struct dentry *, struct iattr *,
+	struct file *);
 extern bool ds_userns_fuse_allow_current_process(struct fuse_conn *);
 #include <linux/user_namespace.h>
 #include <linux/utsname.h>
@@ -220,6 +222,7 @@ static struct ds_hook hooks[] = {
 	HOOK("fuse_get_req", ds_userns_fuse_get_req),
 	HOOK("fuse_change_attributes_common", ds_userns_fuse_change_attributes_common),
 	HOOK("fuse_fillattr", ds_userns_fuse_fillattr),
+	HOOK("fuse_do_setattr", ds_userns_fuse_do_setattr),
 	HOOK("fuse_allow_current_process", ds_userns_fuse_allow_current_process),
 	HOOK_ORIGINAL("sk_getsockopt", ds_userns_sk_getsockopt, ds_userns_sk_getsockopt_original),
 	HOOK("netlink_recvmsg", ds_userns_netlink_recvmsg),
