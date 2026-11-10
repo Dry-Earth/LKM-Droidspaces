@@ -24,7 +24,6 @@ extern u32 ds_userns_alloc_mnt_ns_original[];
 extern int ds_userns_fuse_parse_param(struct fs_context *, struct fs_parameter *);
 extern int ds_userns_fuse_show_options(struct seq_file *, struct dentry *);
 extern struct fuse_req *ds_userns_fuse_get_req(struct fuse_mount *, bool);
-extern void ds_userns_fuse_force_creds(struct fuse_req *);
 extern void ds_userns_fuse_change_attributes_common(struct inode *,
 	struct fuse_attr *, struct fuse_statx *, u64, u32);
 extern void ds_userns_fuse_fillattr(struct inode *, struct fuse_attr *,
@@ -219,7 +218,6 @@ static struct ds_hook hooks[] = {
 	HOOK("fuse_parse_param", ds_userns_fuse_parse_param),
 	HOOK("fuse_show_options", ds_userns_fuse_show_options),
 	HOOK("fuse_get_req", ds_userns_fuse_get_req),
-	HOOK("fuse_force_creds", ds_userns_fuse_force_creds),
 	HOOK("fuse_change_attributes_common", ds_userns_fuse_change_attributes_common),
 	HOOK("fuse_fillattr", ds_userns_fuse_fillattr),
 	HOOK("fuse_allow_current_process", ds_userns_fuse_allow_current_process),
