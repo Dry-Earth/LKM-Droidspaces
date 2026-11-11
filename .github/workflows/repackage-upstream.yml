@@ -1,4 +1,4 @@
-name: Repackage hummer phDroid upstream
+name: [phDroid] Repackage normal/safe
 
 # 不重编内核，下载已有 upstream build 的 ko，按 safe_mode 重新打包。
 
