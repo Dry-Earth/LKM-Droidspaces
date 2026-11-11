@@ -50,13 +50,18 @@
 - 产物模块 ID 是 `droidspaces_hummer`，与 phDroid 互斥。
 - 详细限制见 [README-SHIKOCHIN.md](README-SHIKOCHIN.md)。
 
-### 上游更新后同步
+### 上游更新了怎么办
 
-**Actions → `[Maintenance] Sync upstream _patchHarmony`**
+**不要点自动 sync**。旧的那个 sync workflow 会 `git reset --hard` 到上游树，
+会把你 fork 里的 6.6 USER_NS / FUSE / Shikochin / WebUI 修改全部覆盖掉。
 
-- 文件：`.github/workflows/sync-upstream.yml`
-- 会把 fork 的源码同步到上游 main 的最新提交，同时保留当前 workflow 文件。
-- 同步后建议重新跑 `[phDroid] Build from OTA`。
+正确做法是：
+
+1. 看上游新提交（例如 `dfae0675`）；
+2. 只把涉及的源文件合进来，保留 `module/`、`webui/`、`third_party/` 的本地修改；
+3. 再跑 `[phDroid] Build from OTA`。
+
+这个 fork 已经按这种方式同步过 `dfae0675`，不需要再跑自动 sync。
 
 ### 固定 20261030 内核输入的 phDroid 构建（备用）
 
@@ -78,6 +83,7 @@
 | `.github/workflows/repackage-hummer.yml.disabled` | 旧 safety 重打包 |
 | `.github/workflows/build.yml.disabled` | 上游通用 GKI 构建 |
 | `.github/workflows/module.yml.disabled` | 上游通用 module zip |
+| `.github/workflows/sync-upstream.yml.disabled` | 危险的自动 sync（会覆盖本地 6.6 修改） |
 
 如果 Actions 列表里还残留它们的旧 run，忽略即可。
 
@@ -95,7 +101,7 @@
   └─ [Shikochin] Build from OTA
 
 上游更新了
-  └─ [Maintenance] Sync upstream _patchHarmony
+  └─ 手动合并上游源文件，不要跑自动 sync
 ```
 
 ---
