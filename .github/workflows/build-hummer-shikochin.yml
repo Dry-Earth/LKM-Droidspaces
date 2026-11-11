@@ -1,4 +1,4 @@
-name: [Shikochin] Build from OTA
+name: "[Shikochin] Build from OTA"
 
 # 把 third_party/shikochin-lkm 的 PID/IPC namespace 移植编译到
 # OnePlus Ace 5 Pro (hummer)。
