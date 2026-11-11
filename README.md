@@ -1,11 +1,11 @@
-# phDroid (upstream 9f65632) for OnePlus Ace 5 Pro (hummer)
+# phDroid (upstream dfae0675) for OnePlus Ace 5 Pro (hummer)
 
 在 **LineageOS 24.0 原厂内核**上补 Droidspaces 所需的
 PID / IPC / SYSVIPC / POSIX mqueue 能力，不刷内核、保持 Systemless。
 
 本仓库是 [`Dere3046/_patchHarmony`](https://github.com/Dere3046/_patchHarmony)
-的 fork，已同步到上游 **9f65632**（2026-11-05，包含
-`fix panic` / `fix pid cache` / native PID），目标设备：
+的 fork，已同步到上游 **dfae0675**（2026-11-11，`fix 6.12 6.18`，
+包含 `fix panic` / `fix pid cache` / native PID / ipcns offset 修复），目标设备：
 
 > **新增：Shikochin 移植**
 >
@@ -45,30 +45,48 @@ PID / IPC / SYSVIPC / POSIX mqueue 能力，不刷内核、保持 Systemless。
 本仓库现在用上游修复后的源码 + **精确 6.6.144 KDIR** + **原厂 clang r596125**
 重新编译，并启用 native PID 后端。
 
+### 2026-11-11 上游 `dfae0675`（fix 6.12 6.18）修了什么
+
+这次主分支只新增了一个提交 `dfae0675`，改 8 个文件：
+
+- `ipcns` 字段偏移：
+  - 模块自己创建的 namespace 用**编译期布局**；
+  - 内核自己分配的 namespace 用**运行期布局**；
+  - 新增 `droid_lkm_ipcns_off()`，修掉 6.12 上“用 build offset 拼 set 指针”导致的崩溃；
+  - 缺 `user_ns` 时打印警告，方便定位。
+- `check_unshare_flags`：
+  - 内核没导出、也没取地址，BTI 下不能直接 indirect call；
+  - 改成“return 进入函数”的调用方式；
+  - 同时检查目标地址是否落在内核 text 范围内，越界就不调用。
+- vendor ghost 的 `task_struct.usage` 初值从 `1000` 改成 `0x40000000`。
+- `ds_ti` 增加 `droid_lkm_layout_build_off()`。
+
+这对 6.6 的 native PID 也有意义：`ipcns` 的 build/runtime offset 分离
+同样适用于我们的 6.6.144 精确 KDIR。
+
 > 注意：这是“更可能稳定”的版本，不是绝对保证。仍然建议先手动加载验证。
 
 ---
 
 ## 产物
 
-### 20261106 OTA 包（最新，带 WebUI）
+### 最新：20261106 OTA + 上游 dfae0675（带 WebUI）
 
-- Release：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-ota-42368940611
+**正常包：**
+
+- Release：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-ota-43028111848
 - zip：`phDroid-v2.0.0-hummer.zip`
-- sha256：`853ab0a96fb01895cca6104b1950ed5a70d25118de406695fa8cb6791e009286`
-- 这版由 OTA 工作流自动解析 `20261106` 的 manifest 和 boot.img 生成
-- 20261106 的 boot sha256：`0af12a32e476b40752da27344f05198161cd84de977d8f4c58bc649809904456`
+- sha256：`d60ba311680ea9baf5fc143a1a2fec46303777f68860ce68ac1f2e75125c8579`
+- 模块：`droid_lkm` + `droid_lkm_vendor`
+- ko：
+  - `droid_lkm.ko` sha256 `ae2fe3967647bbbfde4f559f4ce175be7b8ebb871d1d018ad07652ecdc512024`
+  - `droid_lkm_vendor.ko` sha256 `ae8a75b4e37725a661c6032a1620957beebbdd6197bb55a8def48dd9da0a428e`
 
-> 解析结果：20261106 仍然是
-> kernel `6350e8af...` / modules `e05c031c...` / release `6.6.144-4k-g6350e8af3f4c`
-> / clang `r596125`，和 20261030 相同，所以之前的模块也兼容。
+**安全模式包（只加载 droid_lkm）：**
 
-### 20261030 包（带 WebUI）
-
-- 正常包：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-upstream-42248909106
-  - sha256 `d386395d8f7b18d203f312daf7a81ea02aca40c9c061ff90dece61020d35a21d`
-- 安全包：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-upstream-safe-42249159170
-  - sha256 `31061178f52a57400d676e5d48f21eb93b01069ea46f7639ade2153faed67ca8`
+- Release：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-upstream-safe-43033226466
+- zip：`phDroid-v2.0.0-hummer-safe.zip`
+- sha256：`4da1693ab0ac232e874b8a5a489f65c4490c57409d19d6c2d78bfc5737f937dd`
 
 两个包的 vermagic 都是：
 
@@ -76,8 +94,25 @@ PID / IPC / SYSVIPC / POSIX mqueue 能力，不刷内核、保持 Systemless。
 vermagic=6.6.144-4k-g6350e8af3f4c SMP preempt mod_unload modversions aarch64
 ```
 
+20261106 OTA 的 boot sha256：
+
+```
+0af12a32e476b40752da27344f05198161cd84de977d8f4c58bc649809904456
+```
+
+> 20261106 仍是 kernel `6350e8af...` / modules `e05c031c...` /
+> release `6.6.144-4k-g6350e8af3f4c` / clang `r596125`，和 20261030 相同；
+> 新包的主要变化是上游 `dfae0675` 的 ipcns/BTI 修复。
+
+### 旧包（20261030，保留作回退）
+
+- 正常包：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-upstream-42248909106
+  - sha256 `d386395d8f7b18d203f312daf7a81ea02aca40c9c061ff90dece61020d35a21d`
+- 安全包：https://github.com/Dry-Earth/LKM-Droidspaces/releases/tag/phdroid-upstream-safe-42249159170
+  - sha256 `31061178f52a57400d676e5d48f21eb93b01069ea46f7639ade2153faed67ca8`
+
 > 旧包 `phdroid-upstream-42240247134` / `phdroid-upstream-safe-42246001655`
-> 是上游打包修正版，但**没有 WebUI**；请使用带 WebUI 的版本。
+> 没有 WebUI；请使用带 WebUI 的版本。
 
 ### WebUI 已恢复
 
