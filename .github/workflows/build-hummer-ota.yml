@@ -213,7 +213,7 @@ jobs:
             "$DDK_IMAGE" \
             bash /work/ci/build-kdir.sh
 
-      - name: Build phDroid LKM (native PID)
+      - name: Build phDroid LKM (native + main PID backends)
         run: |
           set -eux
           docker run --rm \
@@ -224,6 +224,7 @@ jobs:
             -e VER="$KMI" \
             -e EXPECTED_CLANG \
             -e DROID_LKM_NATIVE_PID=1 \
+            -e DROID_LKM_PID_BOTH=1 \
             "$DDK_IMAGE" \
             bash /work/ci/build-lkm.sh
 
