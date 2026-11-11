@@ -1,4 +1,4 @@
-name: [phDroid] Build pinned kernel (20261030)
+name: "[phDroid] Build pinned kernel (20261030)"
 
 # 基于 Dere3046/_patchHarmony 9f65632（fix panic / fix pid cache），
 # 用精确 6.6.144 KDIR + 原厂 clang r596125 编译 native PID 版本。
