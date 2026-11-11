@@ -912,7 +912,7 @@ static __nocfi noinline bool droid_lkm_unshare_precheck(unsigned long flags)
 		f |= CLONE_FS;
 
 	if (droid_lkm_check_unshare_flags_fn &&
-		    droid_lkm_call_flag_check(droid_lkm_check_unshare_flags_fn, f))
+	    droid_lkm_call_flag_check(droid_lkm_check_unshare_flags_fn, f))
 		return false;
 
 	if ((flags & DROID_LKM_NS_ALL) &&
@@ -1037,14 +1037,12 @@ static int droid_lkm_nsproxy_hook_install(void)
 
 	droid_lkm_check_unshare_flags_fn =
 		(int (*)(unsigned long))droid_lkm_sym("check_unshare_flags");
-
 	if (droid_lkm_check_unshare_flags_fn &&
-	    droid_lkm_call_flag_check(droid_lkm_check_unshare_flags_fn, f))
-		return false;
-
-	if ((flags & DROID_LKM_NS_ALL) &&
-	    !ns_capable(droid_lkm_current_user_ns(), CAP_SYS_ADMIN))
-		return false;
+	    !droid_lkm_kernel_text_addr((unsigned long)droid_lkm_check_unshare_flags_fn)) {
+		droid_lkm_warn("check_unshare_flags %lx outside the image\n",
+			       (unsigned long)droid_lkm_check_unshare_flags_fn);
+		droid_lkm_check_unshare_flags_fn = NULL;
+	}
 
 	ret = ds_hook_install_critical(&droid_lkm_cnn_hook,
 					"create_new_namespaces",
