@@ -1,4 +1,4 @@
-name: [phDroid] Build from OTA (upstream _patchHarmony)
+name: "[phDroid] Build from OTA (upstream _patchHarmony)"
 
 # 输入任意 LineageOS OTA 的 boot.img + build-manifest.xml，
 # 自动解析 kernel/modules/devicetrees/clang 的精确 revision，
