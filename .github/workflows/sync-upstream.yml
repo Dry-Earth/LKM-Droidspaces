@@ -1,4 +1,4 @@
-name: Sync upstream _patchHarmony
+name: [Maintenance] Sync upstream _patchHarmony
 
 on:
   workflow_dispatch:
