@@ -1,5 +1,7 @@
 # phDroid (upstream dfae0675) for OnePlus Ace 5 Pro (hummer)
 
+> **Workflow 导航：见 [README-WORKFLOWS.md](README-WORKFLOWS.md)**（phDroid / Shikochin / legacy 区分）
+
 在 **LineageOS 24.0 原厂内核**上补 Droidspaces 所需的
 PID / IPC / SYSVIPC / POSIX mqueue 能力，不刷内核、保持 Systemless。
 
