@@ -6,10 +6,15 @@ on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: 'Build hummer phDroid (upstream) run ID'
+        description: 'Build phDroid run ID'
         required: true
         type: string
         default: '42240247134'
+      artifact_prefix:
+        description: 'Artifact 名前缀（OTA 用 phdroid-ota，固定构建用 phdroid-upstream）'
+        required: false
+        type: string
+        default: 'phdroid-upstream'
       safe_mode:
         description: '安全模式：不加载 droid_lkm_vendor'
         required: true
@@ -40,7 +45,7 @@ jobs:
       - name: Download ko artifact
         uses: actions/download-artifact@v4
         with:
-          name: phdroid-upstream-${{ inputs.run_id }}
+          name: ${{ inputs.artifact_prefix }}-${{ inputs.run_id }}
           run-id: ${{ inputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: art
