@@ -169,12 +169,13 @@ jobs:
             "$DDK_IMAGE" \
             bash /work/ci/build-kdir.sh
 
-      - name: Build phDroid LKM (native PID)
+      - name: Build phDroid LKM (native + main PID backends)
         env:
           KERNELRELEASE: ${{ env.EXPECTED_RELEASE }}
           KDIR: /work/kernel/out
           VER: ${{ env.KMI }}
           DROID_LKM_NATIVE_PID: "1"
+          DROID_LKM_PID_BOTH: "1"
         run: |
           set -eux
           docker run --rm \
@@ -184,6 +185,7 @@ jobs:
             -e KDIR \
             -e VER \
             -e DROID_LKM_NATIVE_PID \
+            -e DROID_LKM_PID_BOTH \
             "$DDK_IMAGE" \
             bash /work/ci/build-lkm.sh
 
@@ -212,7 +214,7 @@ jobs:
             echo "KMI:           ${KMI}"
             echo "config:        config/hummer_config.gz"
             echo "clang:         $(clang-stock/bin/clang --version | head -n1)"
-            echo "native PID:    1"
+            echo "PID backends:  native+main (default main)"
             echo "safe mode:     ${{ inputs.safe_mode }}"
             echo
             echo "build-id:"
