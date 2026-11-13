@@ -4,7 +4,7 @@
 
 | 实现 | 模块 ID | 源码 | 说明 |
 |---|---|---|---|
-| **phDroid** | `phdroid` | `src/`（上游 `Dere3046/_patchHarmony` + 本 fork 修改） | 主力实现，支持 native PID |
+| **phDroid** | `phdroid` | `src/`（上游 `Dere3046/_patchHarmony` + 本 fork 修改） | 主力实现，默认同时编入 `main` + `native` 两套 PID 后端 |
 | **Shikochin** | `droidspaces_hummer` | `third_party/shikochin-lkm/` | 第二套 6.6 移植，可选 devtmpfs / userns 子集 |
 
 > `phDroid` 和 Shikochin **不能同时启用**。安装器会检测并中止。
@@ -23,8 +23,24 @@
   - `manifest_url`
   - `safe_mode`
   - `publish_release`
-- 它会自动解析 OTA 的 kernel/modules/clang revision，从 boot.img 提取 config/release/clang，然后编 native PID、打包。
+- 它会自动解析 OTA 的 kernel/modules/clang revision，从 boot.img 提取 config/release/clang，然后编 **native + main 双后端**、打包。
 - 当前 20261106 OTA 已跑通。
+
+### PID 后端（`pid_impl`）
+
+最近的两个 phDroid 构建（OTA 和 pinned）都带 `DROID_LKM_PID_BOTH=1`：
+
+| 后端 | 说明 | 切换 |
+|---|---|---|
+| `main` | 旧实现，默认 | 不写 `pid_impl` 即为 `main` |
+| `native` | 6.6 新实现 | `config.conf` 写 `droid_lkm=pid_impl=native` |
+
+`pid_impl` 是 **insmod 参数**（加载后不可改），切换需要停容器、`rmmod droid_lkm`、改 config、重新 `service.sh load`。
+
+> 已知问题：App 终端退出时的手机会硬重启，**不是 PID 后端的问题**（`main`/`native` 都复现）。
+> 已在 app 侧定位为 `permissive droidspacesd` 的 AVC 审计洪泛打满 audit backlog：
+> - https://github.com/ravindu644/Droidspaces-OSS/issues/390
+> - https://github.com/Dere3046/_patchHarmony/issues/15
 
 ### 只想重新打一个 normal/safe 包（不重编内核）
 
@@ -61,7 +77,11 @@
 2. 只把涉及的源文件合进来，保留 `module/`、`webui/`、`third_party/` 的本地修改；
 3. 再跑 `[phDroid] Build from OTA`。
 
-这个 fork 已经按这种方式同步过 `dfae0675`，不需要再跑自动 sync。
+这个 fork 已经按这种方式同步过 `dfae0675` 和 `f8bdeddd`，不需要再跑自动 sync。
+
+> `f8bdeddd` 是 IPC layout/BTF 重构（17 个文件）；`ds_slot.c` 保留 6.6 版本，
+> 没有合并 `e9b18854` 里给 5.15 用的 `do_exit` 重复清理钩子（6.6 的
+> `exit_task_namespaces` 不是内联的，加了会重复 cleanup）。
 
 ### 固定 20261030 内核输入的 phDroid 构建（备用）
 
