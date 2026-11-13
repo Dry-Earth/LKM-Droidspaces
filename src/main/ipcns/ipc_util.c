@@ -66,7 +66,6 @@
 #include <linux/rwsem.h>
 #include <linux/memory.h>
 #include <linux/ipc_namespace.h>
-#include <linux/rhashtable.h>
 #include <linux/log2.h>
 #include <linux/version.h>
 
@@ -150,26 +149,24 @@ int droid_lkm_ipc_util_init(void)
 	return ipc_init();
 }
 
-static const struct rhashtable_params ipc_kht_params = {
-	.head_offset		= offsetof(struct kern_ipc_perm, khtnode),
-	.key_offset		= offsetof(struct kern_ipc_perm, key),
-	.key_len		= sizeof_field(struct kern_ipc_perm, key),
-	.automatic_shrinking	= true,
-};
-
 /**
  * ipc_init_ids	- initialise ipc identifiers
  * @ids: ipc identifier set
  *
  * Set up the sequence range to use for the ipc identifier range (limited
- * below ipc_mni) then initialise the keys hashtable and ids idr.
+ * below ipc_mni) then initialise the ids idr.
+ *
+ * the key lookup walks the idr instead of the kernel's key_ht.
+ * rhashtable_init() is out of line and zeroes sizeof(struct rhashtable) as the
+ * running kernel sees it, which runs past a field the module sized itself and
+ * lands on sem_ctls. the walk runs under ipc_ids.rwsem and one namespace holds
+ * few sysv objects.
  */
 void ipc_init_ids(struct ipc_ids *ids)
 {
 	ids->in_use = 0;
 	ids->seq = 0;
 	init_rwsem(&ids->rwsem);
-	rhashtable_init(&ids->key_ht, &ipc_kht_params);
 	idr_init(&ids->ipcs_idr);
 	ids->max_idx = -1;
 	ids->last_idx = -1;
@@ -238,15 +235,23 @@ void ipc_init_proc_interface(const char *path, const char *header,
 static struct kern_ipc_perm *ipc_findkey(struct ipc_ids *ids, key_t key)
 {
 	struct kern_ipc_perm *ipcp;
+	int id;
 
-	ipcp = rhashtable_lookup_fast(&ids->key_ht, &key,
-					      ipc_kht_params);
-	if (!ipcp)
+	/* private objects are keyed IPC_PRIVATE and never searched for */
+	if (key == IPC_PRIVATE)
 		return NULL;
 
-	rcu_read_lock();
-	ipc_lock_object(ipcp);
-	return ipcp;
+	/* the rwsem keeps the objects in place, nothing here can be freed */
+	idr_for_each_entry(&ids->ipcs_idr, ipcp, id) {
+		if (ipcp->key != key)
+			continue;
+
+		rcu_read_lock();
+		ipc_lock_object(ipcp);
+		return ipcp;
+	}
+
+	return NULL;
 }
 
 /*
@@ -345,7 +350,7 @@ int ipc_addid(struct ipc_ids *ids, struct kern_ipc_perm *new, int limit)
 {
 	kuid_t euid;
 	kgid_t egid;
-	int idx, err;
+	int idx;
 
 	/* 1) Initialize the refcount so that ipc_rcu_putref works */
 	refcount_set(&new->refcount, 1);
@@ -371,14 +376,6 @@ int ipc_addid(struct ipc_ids *ids, struct kern_ipc_perm *new, int limit)
 	idx = ipc_idr_alloc(ids, new);
 	idr_preload_end();
 
-	if (idx >= 0 && new->key != IPC_PRIVATE) {
-		err = rhashtable_insert_fast(&ids->key_ht, &new->khtnode,
-					     ipc_kht_params);
-		if (err < 0) {
-			idr_remove(&ids->ipcs_idr, idx);
-			idx = err;
-		}
-	}
 	if (idx < 0) {
 		new->deleted = true;
 		spin_unlock(&new->lock);
@@ -503,21 +500,6 @@ static int ipcget_public(struct ipc_namespace *ns, struct ipc_ids *ids,
 }
 
 /**
- * ipc_kht_remove - remove an ipc from the key hashtable
- * @ids: ipc identifier set
- * @ipcp: ipc perm structure containing the key to remove
- *
- * ipc_ids.rwsem (as a writer) and the spinlock for this ID are held
- * before this function is called, and remain locked on the exit.
- */
-static void ipc_kht_remove(struct ipc_ids *ids, struct kern_ipc_perm *ipcp)
-{
-	if (ipcp->key != IPC_PRIVATE)
-		WARN_ON_ONCE(rhashtable_remove_fast(&ids->key_ht, &ipcp->khtnode,
-				       ipc_kht_params));
-}
-
-/**
  * ipc_search_maxidx - search for the highest assigned index
  * @ids: ipc identifier set
  * @limit: known upper limit for highest assigned index
@@ -565,7 +547,6 @@ void ipc_rmid(struct ipc_ids *ids, struct kern_ipc_perm *ipcp)
 	int idx = ipcid_to_idx(ipcp->id);
 
 	WARN_ON_ONCE(idr_remove(&ids->ipcs_idr, idx) != ipcp);
-	ipc_kht_remove(ids, ipcp);
 	ids->in_use--;
 	ipcp->deleted = true;
 
@@ -587,7 +568,6 @@ void ipc_rmid(struct ipc_ids *ids, struct kern_ipc_perm *ipcp)
  */
 void ipc_set_key_private(struct ipc_ids *ids, struct kern_ipc_perm *ipcp)
 {
-	ipc_kht_remove(ids, ipcp);
 	ipcp->key = IPC_PRIVATE;
 }
 
@@ -631,7 +611,7 @@ int ipcperms(struct ipc_namespace *ns, struct kern_ipc_perm *ipcp, short flag)
 		granted_mode >>= 3;
 	/* is there some bit set in requested_mode but not in granted_mode? */
 	if ((requested_mode & ~granted_mode & 0007) &&
-	    !ns_capable(ns->user_ns, CAP_IPC_OWNER))
+	    !ns_capable(droid_lkm_ipcns_user_ns(ns), CAP_IPC_OWNER))
 		return -1;
 
 	return security_ipc_permission(ipcp, flag);
@@ -806,7 +786,7 @@ struct kern_ipc_perm *ipcctl_obtain_check(struct ipc_namespace *ns,
 
 	euid = current_euid();
 	if (uid_eq(euid, ipcp->cuid) || uid_eq(euid, ipcp->uid)  ||
-	    ns_capable(ns->user_ns, CAP_SYS_ADMIN))
+	    ns_capable(droid_lkm_ipcns_user_ns(ns), CAP_SYS_ADMIN))
 		return ipcp; /* successful lookup */
 err:
 	return ERR_PTR(err);
@@ -894,7 +874,8 @@ static void *sysvipc_proc_next(struct seq_file *s, void *it, loff_t *pos)
 
 	/* Next -> search for *pos+1 */
 	(*pos)++;
-	return sysvipc_find_ipc(&iter->ns->ids[iface->ids], pos);
+	return sysvipc_find_ipc(droid_lkm_ipcns_ids(iter->ns, iface->ids),
+				pos);
 }
 
 /*
@@ -907,7 +888,7 @@ static void *sysvipc_proc_start(struct seq_file *s, loff_t *pos)
 	struct ipc_proc_iface *iface = iter->iface;
 	struct ipc_ids *ids;
 
-	ids = &iter->ns->ids[iface->ids];
+	ids = droid_lkm_ipcns_ids(iter->ns, iface->ids);
 
 	/*
 	 * Take the lock - this will be released by the corresponding
@@ -938,7 +919,7 @@ static void sysvipc_proc_stop(struct seq_file *s, void *it)
 	if (ipc && ipc != SEQ_START_TOKEN)
 		ipc_unlock(ipc);
 
-	ids = &iter->ns->ids[iface->ids];
+	ids = droid_lkm_ipcns_ids(iter->ns, iface->ids);
 	/* Release the lock we took in start() */
 	up_read(&ids->rwsem);
 }
