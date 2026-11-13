@@ -257,7 +257,7 @@ jobs:
             echo "release:       ${EXPECTED_RELEASE}"
             echo "clang:         $(clang-stock/bin/clang --version | head -n1)"
             echo "KMI:           ${KMI}"
-            echo "native PID:    1"
+            echo "PID backends:  native+main (default main)"
             echo "safe mode:     ${{ inputs.safe_mode }}"
             echo
             echo "build-id:"
