@@ -15,6 +15,7 @@ export LLVM_IAS=1
 export CROSS_COMPILE=aarch64-linux-gnu-
 
 EXPECTED_CLANG=${EXPECTED_CLANG:-r596125}
+KERNELRELEASE=${KERNELRELEASE:-${EXPECTED_RELEASE:?KERNELRELEASE or EXPECTED_RELEASE required}}
 clang --version | head -n1
 clang --version | grep -q "$EXPECTED_CLANG" || {
 	echo "::error::clang does not match $EXPECTED_CLANG"

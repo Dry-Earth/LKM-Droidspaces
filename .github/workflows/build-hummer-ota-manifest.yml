@@ -227,6 +227,7 @@ jobs:
           export CCACHE_BASEDIR="$PWD"
           export CCACHE_COMPRESS=1
           export CCACHE_MAXSIZE=5G
+          export KERNELRELEASE="$EXPECTED_RELEASE"
           bash ci/build-kdir-host.sh
 
       - name: Save ccache even if a later step fails
