@@ -1,30 +1,27 @@
 # Workflow 导航：该点哪一个？
 
-本仓库现在有 **两套独立的内核模块实现**，不要混用：
+本仓库只有一套内核模块实现：
 
 | 实现 | 模块 ID | 源码 | 说明 |
 |---|---|---|---|
-| **phDroid** | `phdroid` | `src/`（上游 `Dere3046/_patchHarmony` + 本 fork 修改） | 主力实现，默认同时编入 `main` + `native` 两套 PID 后端 |
-| **Shikochin** | `droidspaces_hummer` | `third_party/shikochin-lkm/` | 第二套 6.6 移植，可选 devtmpfs / userns 子集 |
-
-> `phDroid` 和 Shikochin **不能同时启用**。安装器会检测并中止。
+| **phDroid** | `phdroid` | `src/`（上游 `Dere3046/_patchHarmony` + 本 fork 修改） | 默认同时编入 `main` + `native` 两套 PID 后端 |
 
 ---
 
 ## 一、最常用的入口
 
-### 想用上游 `_patchHarmony` 构建 phDroid（推荐）
+### 手动填 OTA 链接，自动构建（推荐）
 
 **Actions → `[phDroid] Build from OTA (upstream _patchHarmony)`**
 
 - 文件：`.github/workflows/build-hummer-ota.yml`
 - 输入：
-  - `boot_img_url`
-  - `manifest_url`
+  - `boot_img_url`：OTA 的 `boot.img`
+  - `manifest_url`：OTA 的 `build-manifest.xml`
   - `safe_mode`
   - `publish_release`
-- 它会自动解析 OTA 的 kernel/modules/clang revision，从 boot.img 提取 config/release/clang，然后编 **native + main 双后端**、打包。
-- 当前 20261106 OTA 已跑通。
+- 自动解析 OTA 的 kernel/modules/clang revision，从 boot.img 提取 config/release/clang，然后编 **native + main 双后端**、打包。
+- 当前 20261113 OTA 已跑通。
 
 ### PID 后端（`pid_impl`）
 
@@ -37,10 +34,9 @@
 
 `pid_impl` 是 **insmod 参数**（加载后不可改），切换需要停容器、`rmmod droid_lkm`、改 config、重新 `service.sh load`。
 
-> 已知问题：App 终端退出时的手机会硬重启，**不是 PID 后端的问题**（`main`/`native` 都复现）。
-> 已在 app 侧定位为 `permissive droidspacesd` 的 AVC 审计洪泛打满 audit backlog：
-> - https://github.com/ravindu644/Droidspaces-OSS/issues/390
-> - https://github.com/Dere3046/_patchHarmony/issues/15
+> 已知问题：App 终端退出时手机会硬重启，`main` / `native` 都复现，`dontaudit` 补丁也不能解决。
+> 当前定位在 `__tty_hangup -> tty_signal_session_leader` 的 `tasklist_lock` 死锁：
+> https://github.com/Dere3046/_patchHarmony/issues/15
 
 ### 只想重新打一个 normal/safe 包（不重编内核）
 
@@ -53,28 +49,14 @@
   - `safe_mode`
 - 适合只改 `module/` 脚本或 WebUI 时快速出包。
 
-### 用 Shikochin 第二套实现
-
-**Actions → `[Shikochin] Build from OTA`**
-
-- 文件：`.github/workflows/build-hummer-shikochin.yml`
-- 输入：
-  - `use_ota`、`boot_img_url`、`manifest_url`
-  - `build_devtmpfs`（默认 ✅）
-  - `build_netfilter`（6.6 默认 ❌）
-  - `build_userns`（6.6 实验，默认 ❌）
-- 产物模块 ID 是 `droidspaces_hummer`，与 phDroid 互斥。
-- 详细限制见 [README-SHIKOCHIN.md](README-SHIKOCHIN.md)。
-
 ### 上游更新了怎么办
 
-**不要点自动 sync**。旧的那个 sync workflow 会 `git reset --hard` 到上游树，
-会把你 fork 里的 6.6 USER_NS / FUSE / Shikochin / WebUI 修改全部覆盖掉。
+不要自动 sync。自动 sync 会 `git reset --hard` 到上游树，把 fork 里的 6.6 修改全部覆盖掉。
 
 正确做法是：
 
-1. 看上游新提交（例如 `dfae0675`）；
-2. 只把涉及的源文件合进来，保留 `module/`、`webui/`、`third_party/` 的本地修改；
+1. 看上游新提交（例如 `f8bdeddd`）；
+2. 只把涉及的源文件合进来，保留 `module/`、`webroot/` 的本地修改；
 3. 再跑 `[phDroid] Build from OTA`。
 
 这个 fork 已经按这种方式同步过 `dfae0675` 和 `f8bdeddd`，不需要再跑自动 sync。
@@ -99,11 +81,8 @@
 
 | 文件 | 原用途 |
 |---|---|
-| `.github/workflows/build-hummer-lkm.yml.disabled` | 旧 phDroid v1/v2 打包 |
-| `.github/workflows/repackage-hummer.yml.disabled` | 旧 safety 重打包 |
 | `.github/workflows/build.yml.disabled` | 上游通用 GKI 构建 |
 | `.github/workflows/module.yml.disabled` | 上游通用 module zip |
-| `.github/workflows/sync-upstream.yml.disabled` | 危险的自动 sync（会覆盖本地 6.6 修改） |
 
 如果 Actions 列表里还残留它们的旧 run，忽略即可。
 
@@ -116,9 +95,6 @@
   ├─ 正常构建 → [phDroid] Build from OTA (upstream _patchHarmony)
   ├─ 只重打包 → [phDroid] Repackage normal/safe
   └─ 固定旧内核 → [phDroid] Build pinned kernel (20261030)
-
-要 Shikochin（第二套实现）
-  └─ [Shikochin] Build from OTA
 
 上游更新了
   └─ 手动合并上游源文件，不要跑自动 sync
@@ -133,7 +109,6 @@
 | `[phDroid] Build from OTA` | `phdroid-ota-<run_id>` / `phDroid-v2.0.0-hummer.zip` |
 | `[phDroid] Build pinned` | `phdroid-upstream-<run_id>` |
 | `[phDroid] Repackage` | `phdroid-upstream-safe-<run_id>` 或 normal |
-| `[Shikochin] Build from OTA` | `droidspaces-hummer-<run_id>` / `Droidspaces-LKM-hummer-*.zip` |
 
 安全包只加载 `droid_lkm`，不加载 `droid_lkm_vendor`；
 正常包两个都加载。第一次测试建议先装 safe 包。

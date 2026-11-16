@@ -1,6 +1,6 @@
 # phDroid (upstream dfae0675) for OnePlus Ace 5 Pro (hummer)
 
-> **Workflow 导航：见 [README-WORKFLOWS.md](README-WORKFLOWS.md)**（phDroid / Shikochin / legacy 区分）
+> **Workflow 导航：见 [README-WORKFLOWS.md](README-WORKFLOWS.md)**（phDroid / legacy 区分）
 
 在 **LineageOS 24.0 原厂内核**上补 Droidspaces 所需的
 PID / IPC / SYSVIPC / POSIX mqueue 能力，不刷内核、保持 Systemless。
@@ -8,16 +8,6 @@ PID / IPC / SYSVIPC / POSIX mqueue 能力，不刷内核、保持 Systemless。
 本仓库是 [`Dere3046/_patchHarmony`](https://github.com/Dere3046/_patchHarmony)
 的 fork，已同步到上游 **dfae0675**（2026-11-11，`fix 6.12 6.18`，
 包含 `fix panic` / `fix pid cache` / native PID / ipcns offset 修复），目标设备：
-
-> **新增：Shikochin 移植**
->
-> 仓库现在同时包含 [Shikochin/Droidspaces-LKM](https://github.com/Shikochin/Droidspaces-LKM)
-> 的第二套 6.6 实现（PID/IPC namespace + 可选 devtmpfs），源码在
-> `third_party/shikochin-lkm/`，构建入口是
-> `.github/workflows/build-hummer-shikochin.yml`（支持 OTA 自动解析，
-> 也可以关闭 `use_ota` 用固定 SHA）。
-> 模块 ID 为 `droidspaces_hummer`，**不能和 phDroid 同时启用**。
-> 说明、限制和安装步骤见 [README-SHIKOCHIN.md](README-SHIKOCHIN.md)。
 
 | 项目 | 值 |
 |---|---|
