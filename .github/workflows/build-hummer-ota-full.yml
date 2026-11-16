@@ -1,14 +1,15 @@
 name: "[phDroid] Build from OTA + extras (check green)"
 
-# Same exact-KDIR build as "[phDroid] Build from OTA", plus the five extra
-# modules that the vendor kernel is missing, so `droidspaces check` can be
-# fully green:
+# Same exact-KDIR build as "[phDroid] Build from OTA", plus the extra modules
+# that the stock config is missing, so `droidspaces check` can be fully green:
 #
 #   devtmpfs_lkm, macvlan, ip6table_nat, droid_lkm_pids, droid_lkm_cpu
 #
-# The extra sources come from a pinned commit of the extra-module repo. They are
-# built against the same KDIR as droid_lkm, so all .ko files share the exact
-# vermagic. The packaged module loads them after droid_lkm.
+# The build reads build-config/stock.config (extracted from the stock boot.img)
+# and only builds a module when the CONFIG it stands in for is not already
+# enabled, so a future OTA that turns one of them on will not get a duplicate.
+# The extra sources come from a pinned commit of the extra-module repo and are
+# built against the same KDIR, so all .ko files share the exact vermagic.
 on:
   workflow_dispatch:
     inputs:
@@ -268,6 +269,7 @@ jobs:
             -e KSRC=/work/kernel \
             -e EXTRAS=/work/extras \
             -e OUT=/work/out/"$KMI" \
+            -e STOCK_CONFIG=/work/build-config/stock.config \
             "$DDK_IMAGE" \
             bash /work/ci/build-extra-modules.sh
 
@@ -277,14 +279,25 @@ jobs:
           CONFIG_PATH: build-config/stock.config
         run: bash ci/patch-package.sh
 
-      - name: Add the extra modules to config.conf
+      - name: Add only the built extra modules to config.conf
         run: |
           set -eux
           base=$(sed -n 's/^modules=//p' module/config.conf | tail -n 1)
-          sed -i "s/^modules=.*/modules=${base} devtmpfs_lkm macvlan ip6table_nat droid_lkm_pids droid_lkm_cpu/" module/config.conf
-          grep -q '^devtmpfs_lkm=' module/config.conf || echo 'devtmpfs_lkm=devtmpfs_probe=2' >> module/config.conf
-          sed -i 's/^version=.*/&+extras/' module/module.prop
-          sed -i 's|^description=.*|& + extras (devtmpfs/macvlan/ipv6nat/pids/cpu)|' module/module.prop
+          extras=$(tr '\n' ' ' < "out/$KMI/extra-modules.list" | sed 's/[[:space:]]*$//')
+          echo "base modules : ${base}"
+          echo "extra modules: ${extras:-none}"
+          if [ -n "$extras" ]; then
+            sed -i "s/^modules=.*/modules=${base} ${extras}/" module/config.conf
+          fi
+          case " $extras " in
+            *" devtmpfs_lkm "*)
+              grep -q '^devtmpfs_lkm=' module/config.conf || echo 'devtmpfs_lkm=devtmpfs_probe=2' >> module/config.conf
+              ;;
+          esac
+          if [ -n "$extras" ]; then
+            sed -i 's/^version=.*/&+extras/' module/module.prop
+            sed -i 's|^description=.*|& + extras (only the ones missing from the stock config)|' module/module.prop
+          fi
           cat module/config.conf
           cat module/module.prop
 
@@ -296,16 +309,20 @@ jobs:
           ls -lh dist
           sha256sum dist/*.zip
 
-      - name: Verify the package carries every module
+      - name: Verify the package carries every built module
         run: |
           set -eux
           unzip -l dist/*.zip | sed -n '1,80p'
-          n=$(unzip -l dist/*.zip | grep -c '\.ko$')
-          echo "ko files in zip: $n"
-          test "$n" -ge 6
-          for m in droid_lkm devtmpfs_lkm macvlan ip6table_nat droid_lkm_pids droid_lkm_cpu; do
+          n=$(ls out/"$KMI"/*.ko | wc -l)
+          z=$(unzip -l dist/*.zip | grep -c '\.ko$')
+          echo "built .ko: $n | .ko in zip: $z"
+          test "$n" -eq "$z"
+          for k in out/"$KMI"/*.ko; do
+            m=$(basename "$k" .ko)
             unzip -l dist/*.zip | grep -q "/$m\.ko"
           done
+          echo "==> extra modules in this package:"
+          cat "out/$KMI/extra-modules.list"
 
       - name: Write build info
         run: |
@@ -324,6 +341,7 @@ jobs:
             echo "KMI:           ${KMI}"
             echo "PID backends:  native+main (default main)"
             echo "extras:        ${EXTRAS_REPO} @ ${EXTRAS_SHA}"
+            echo "extras built:  $(tr '\n' ' ' < out/"$KMI"/extra-modules.list)"
             echo "safe mode:     ${{ inputs.safe_mode }}"
             echo
             echo "build-id:"

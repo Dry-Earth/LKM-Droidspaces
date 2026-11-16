@@ -1,33 +1,55 @@
 #!/bin/bash
-# Build the extra modules for the "check green" phDroid package.
+# Build the extra modules the stock kernel is missing.
 #
-# Runs inside the DDK container against the exact KDIR that phDroid was built
-# with, so every .ko carries the same vermagic:
+# The target config is read from the stock boot.img. A module is built only when
+# the CONFIG it stands in for is not already provided by the kernel: a config
+# line of the form CONFIG_X=y (or =m) means the feature is already there, so the
+# module is skipped instead of risking a duplicate registration.
 #
-#   devtmpfs_lkm     <- extra/devtmpfs      (registers devtmpfs)
-#   ip6table_nat     <- extra/net_ip6nat    (IPv6 NAT)
-#   macvlan          <- target kernel tree  (drivers/net/macvlan.c)
-#   droid_lkm_pids   <- extra/cgrouplimits  (cgroup pids controller)
-#   droid_lkm_cpu    <- extra/cgrouplimits  (cpu.max time slicing)
+#   devtmpfs_lkm     <- extra/devtmpfs      when CONFIG_DEVTMPFS is off
+#   ip6table_nat     <- extra/net_ip6nat    when CONFIG_IP6_NF_NAT or
+#                                              CONFIG_IP6_NF_TARGET_MASQUERADE is off
+#   macvlan          <- target kernel tree  when CONFIG_MACVLAN is off
+#   droid_lkm_pids   <- extra/cgrouplimits  when CONFIG_CGROUP_PIDS is off
+#   droid_lkm_cpu    <- extra/cgrouplimits  when CONFIG_CFS_BANDWIDTH is off
 #
-# Sources come from the extra-module checkout (default Dry-Earth/droidspaces-lkm),
-# pinned by EXTRAS_SHA in the workflow.
+# The names that were built are written to $OUT/extra-modules.list, and the
+# packaging step appends only those to config.conf.
 set -euxo pipefail
 
 KDIR=${KDIR:?KDIR is required}
 KSRC=${KSRC:-/work/kernel}
 EXTRAS=${EXTRAS:?EXTRAS is required}
 OUT=${OUT:?OUT is required}
+STOCK_CONFIG=${STOCK_CONFIG:-/work/build-config/stock.config}
 NPROC=$(nproc 2>/dev/null || echo 4)
 
+if [ ! -s "$STOCK_CONFIG" ]; then
+	if [ -s "$KDIR/.config" ]; then
+		STOCK_CONFIG="$KDIR/.config"
+	else
+		echo "::error::no stock config to decide what is missing"
+		exit 1
+	fi
+fi
+
 test -s "$KDIR/Module.symvers"
-test -d "$KSRC/drivers/net"
 test -d "$EXTRAS/extra/devtmpfs"
 test -d "$EXTRAS/extra/net_ip6nat"
 test -d "$EXTRAS/extra/cgrouplimits"
 
 mkdir -p "$OUT"
+LIST="$OUT/extra-modules.list"
+: > "$LIST"
 export KBUILD_MODPOST_WARN=1
+
+cfg_on() {
+	grep -qE "^$1=(y|m)$" "$STOCK_CONFIG"
+}
+
+keep() {
+	echo "$1" >> "$LIST"
+}
 
 clean_dir() {
 	local d=$1
@@ -39,36 +61,65 @@ clean_dir() {
 }
 
 # --- devtmpfs -------------------------------------------------------------
-clean_dir "$EXTRAS/extra/devtmpfs"
-make -C "$KDIR" M="$EXTRAS/extra/devtmpfs" modules -j"$NPROC"
-install -m 644 "$EXTRAS/extra/devtmpfs/devtmpfs_lkm.ko" "$OUT/devtmpfs_lkm.ko"
+if cfg_on CONFIG_DEVTMPFS; then
+	echo "==> skip devtmpfs_lkm: CONFIG_DEVTMPFS is already enabled"
+else
+	clean_dir "$EXTRAS/extra/devtmpfs"
+	make -C "$KDIR" M="$EXTRAS/extra/devtmpfs" modules -j"$NPROC"
+	install -m 644 "$EXTRAS/extra/devtmpfs/devtmpfs_lkm.ko" "$OUT/devtmpfs_lkm.ko"
+	keep devtmpfs_lkm
+fi
 
 # --- IPv6 NAT -------------------------------------------------------------
-clean_dir "$EXTRAS/extra/net_ip6nat"
-make -C "$KDIR" M="$EXTRAS/extra/net_ip6nat" modules -j"$NPROC"
-install -m 644 "$EXTRAS/extra/net_ip6nat/ip6table_nat.ko" "$OUT/ip6table_nat.ko"
+if cfg_on CONFIG_IP6_NF_NAT && cfg_on CONFIG_IP6_NF_TARGET_MASQUERADE; then
+	echo "==> skip ip6table_nat: the IPv6 nat table is already provided"
+else
+	clean_dir "$EXTRAS/extra/net_ip6nat"
+	make -C "$KDIR" M="$EXTRAS/extra/net_ip6nat" modules -j"$NPROC"
+	install -m 644 "$EXTRAS/extra/net_ip6nat/ip6table_nat.ko" "$OUT/ip6table_nat.ko"
+	keep ip6table_nat
+fi
 
-# --- macvlan (kernel tree source, CONFIG_MACVLAN is off in the vendor config)
-MACDIR=/tmp/mod-macvlan
-rm -rf "$MACDIR"
-mkdir -p "$MACDIR"
-cp "$KSRC/drivers/net/macvlan.c" "$MACDIR/"
-cat > "$MACDIR/Makefile" <<'EOF'
+# --- macvlan --------------------------------------------------------------
+if cfg_on CONFIG_MACVLAN; then
+	echo "==> skip macvlan: CONFIG_MACVLAN is already enabled"
+else
+	MACDIR=/tmp/mod-macvlan
+	rm -rf "$MACDIR"
+	mkdir -p "$MACDIR"
+	cp "$KSRC/drivers/net/macvlan.c" "$MACDIR/"
+	cat > "$MACDIR/Makefile" <<'EOF'
 obj-m := macvlan.o
 ccflags-y += -DCONFIG_MACVLAN=1
 EOF
-make -C "$KDIR" M="$MACDIR" modules -j"$NPROC"
-install -m 644 "$MACDIR/macvlan.ko" "$OUT/macvlan.ko"
+	make -C "$KDIR" M="$MACDIR" modules -j"$NPROC"
+	install -m 644 "$MACDIR/macvlan.ko" "$OUT/macvlan.ko"
+	keep macvlan
+fi
 
 # --- pids / cpu limits ----------------------------------------------------
-for m in pids cpu; do
+if cfg_on CONFIG_CGROUP_PIDS; then
+	echo "==> skip droid_lkm_pids: CONFIG_CGROUP_PIDS is already enabled"
+else
 	clean_dir "$EXTRAS/extra/cgrouplimits"
-	make -C "$KDIR" M="$EXTRAS/extra/cgrouplimits" MODULE="droid_lkm_$m" modules -j"$NPROC"
-	install -m 644 "$EXTRAS/extra/cgrouplimits/droid_lkm_$m.ko" "$OUT/droid_lkm_$m.ko"
-done
+	make -C "$KDIR" M="$EXTRAS/extra/cgrouplimits" MODULE=droid_lkm_pids modules -j"$NPROC"
+	install -m 644 "$EXTRAS/extra/cgrouplimits/droid_lkm_pids.ko" "$OUT/droid_lkm_pids.ko"
+	keep droid_lkm_pids
+fi
+
+if cfg_on CONFIG_CFS_BANDWIDTH; then
+	echo "==> skip droid_lkm_cpu: CONFIG_CFS_BANDWIDTH is already enabled"
+else
+	clean_dir "$EXTRAS/extra/cgrouplimits"
+	make -C "$KDIR" M="$EXTRAS/extra/cgrouplimits" MODULE=droid_lkm_cpu modules -j"$NPROC"
+	install -m 644 "$EXTRAS/extra/cgrouplimits/droid_lkm_cpu.ko" "$OUT/droid_lkm_cpu.ko"
+	keep droid_lkm_cpu
+fi
 clean_dir "$EXTRAS/extra/cgrouplimits"
 
-echo "==> extra modules"
+echo "==> extra modules built:"
+cat "$LIST"
+echo "==> .ko in $OUT:"
 ls -lh "$OUT"
 for k in "$OUT"/*.ko; do
 	printf '%s: ' "$k"
