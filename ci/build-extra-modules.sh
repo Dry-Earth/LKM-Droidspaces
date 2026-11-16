@@ -58,6 +58,13 @@ test -d "$EXTRAS/extra/devtmpfs"
 test -d "$EXTRAS/extra/net_ip6nat"
 test -d "$EXTRAS/extra/cgrouplimits"
 
+# CONFIG_DEBUG_INFO_BTF_MODULES=y makes kbuild run pahole on every module. Fail
+# with a clear message instead of the bare "pahole: not found" from make.
+if grep -q '^CONFIG_DEBUG_INFO_BTF_MODULES=y' "$STOCK_CONFIG" && ! pahole --version >/dev/null 2>&1; then
+	echo "::error::pahole is required because CONFIG_DEBUG_INFO_BTF_MODULES is enabled"
+	exit 1
+fi
+
 mkdir -p "$OUT"
 LIST="$OUT/extra-modules.list"
 : > "$LIST"

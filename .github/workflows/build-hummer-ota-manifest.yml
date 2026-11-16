@@ -199,17 +199,19 @@ jobs:
       - name: Ensure pahole is available
         run: |
           set -eux
-          if [ -x tools/kernel-build-tools/bin/pahole ]; then
-            tools/kernel-build-tools/bin/pahole --version
-          elif [ -x tools/build-tools/bin/pahole ]; then
-            tools/build-tools/bin/pahole --version
-          elif command -v pahole >/dev/null 2>&1; then
-            pahole --version
+          # The manifest kernel-build-tools pahole entry can be a wrapper whose
+          # target is missing, so check that it actually runs before trusting it.
+          if [ -x tools/kernel-build-tools/bin/pahole ] && tools/kernel-build-tools/bin/pahole --version; then
+            sudo ln -sf "$PWD/tools/kernel-build-tools/bin/pahole" /usr/local/bin/pahole
+          elif [ -x tools/build-tools/bin/pahole ] && tools/build-tools/bin/pahole --version; then
+            sudo ln -sf "$PWD/tools/build-tools/bin/pahole" /usr/local/bin/pahole
+          elif command -v pahole >/dev/null 2>&1 && pahole --version; then
+            :
           else
-            echo "::warning::manifest prebuilts have no pahole; installing dwarves from Ubuntu"
+            echo "::warning::manifest prebuilts have no usable pahole; installing dwarves from Ubuntu"
             sudo apt-get install -y --no-install-recommends dwarves
-            pahole --version
           fi
+          pahole --version
 
       - name: Restore ccache
         uses: actions/cache@v4
