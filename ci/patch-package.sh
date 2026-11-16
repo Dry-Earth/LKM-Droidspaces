@@ -3,11 +3,18 @@
 set -euxo pipefail
 
 SAFE=${SAFE_MODE:-false}
+KMI=${KMI:-android15-6.6}
+# droid_lkm_misc is only built when the vendor gate allows it; do not name a
+# module that is not in the package.
+misc=""
+if [ -f "out/$KMI/droid_lkm_misc.ko" ]; then
+  misc="droid_lkm_misc"
+fi
 if [ "$SAFE" = "true" ]; then
-  modules="droid_lkm"
+  modules="droid_lkm $misc"
   suffix="-safe"
 else
-  modules="droid_lkm droid_lkm_vendor"
+  modules="droid_lkm $misc droid_lkm_vendor"
   suffix=""
 fi
 
@@ -16,6 +23,10 @@ modules=${modules}
 kmi_override=android15-6.6
 oplus=1
 EOF
+if [ -n "$misc" ]; then
+  # userns only: devtmpfs and xt are provided by the separate extras modules
+  echo 'droid_lkm_misc=userns=1 devtmpfs=0 xt=0' >> module/config.conf
+fi
 
 cfg=${CONFIG_PATH:-config/hummer_config.gz}
 cfg_sha=$(sha256sum "$cfg" 2>/dev/null | awk '{print $1}')

@@ -31,9 +31,10 @@ DLC_VENDOR_OBJS := src/compat/vendor/compat_main.o src/compat/vendor/ghost.o \
 	src/hook/ds_hook.o
 droid_lkm_vendor-y := $(DLC_VENDOR_OBJS) $(DEPS_OBJS_ALL)
 
-# droid_lkm_misc.o is not built yet, it is unfinished; re-enable it with the
-# line below once its sources are ready
-# obj-$(DLKM_OPT) += droid_lkm_misc.o
+# droid_lkm_misc.o carries the fake user namespace (and the devtmpfs / xt
+# pieces, which are disabled at load time so they do not collide with the
+# separate devtmpfs_lkm / ip6table_nat extras). Same 6.6/6.12 gate as vendor.
+obj-$(DLKM_OPT) += droid_lkm_misc.o
 DLM_OBJS := src/misc/misc_main.o \
 	src/misc/misc_ksym.o \
 	src/misc/misc_scope.o \
