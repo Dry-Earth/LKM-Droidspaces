@@ -1,0 +1,382 @@
+name: "[phDroid] Build from OTA + extras (manifest tools)"
+
+# Host build with every tool pinned by the OTA build-manifest.xml:
+#   clang, prebuilts/build-tools, kernel/prebuilts/build-tools, system/tools/mkbootimg
+# No DDK container and no Magisk magiskboot. The boot image is unpacked with the
+# AOSP unpack_bootimg.py from the manifest revision.
+#
+# Same extra-module logic as the DDK workflow: the stock config decides which of
+# devtmpfs_lkm / macvlan / ip6table_nat / droid_lkm_pids / droid_lkm_cpu is
+# actually missing and therefore built.
+on:
+  workflow_dispatch:
+    inputs:
+      boot_img_url:
+        description: 'OTA boot.img URL'
+        required: true
+        type: string
+        default: 'https://mirrorbits.lineageos.org/full/hummer/20261113/boot.img'
+      manifest_url:
+        description: 'OTA build-manifest.xml URL'
+        required: true
+        type: string
+        default: 'https://mirrorbits.lineageos.org/full/hummer/20261113/build-manifest.xml'
+      safe_mode:
+        description: '安全模式：不加载 droid_lkm_vendor'
+        required: true
+        type: boolean
+        default: false
+      publish_release:
+        description: '构建成功后发布 Release'
+        required: true
+        type: boolean
+        default: true
+      extras_repo:
+        description: 'extra 模块源码仓库'
+        required: true
+        type: string
+        default: 'Dry-Earth/droidspaces-lkm'
+      extras_sha:
+        description: 'extra 模块源码的固定 commit'
+        required: true
+        type: string
+        default: '522dc420b5119dcbb97b53ace62f99e1444d84a5'
+
+permissions:
+  contents: write
+
+env:
+  KERNEL_REPO: LineageOS/android_kernel_oneplus_sm8750
+  MODULES_REPO: LineageOS/android_kernel_oneplus_sm8750-modules
+  EXTRAS_REPO: ${{ inputs.extras_repo }}
+  EXTRAS_SHA: ${{ inputs.extras_sha }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+
+    steps:
+      - name: Free disk space
+        run: |
+          set -eux
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h
+
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Install the host packages from the LineageOS build guide
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache cpio curl flex git gnupg gperf kmod \
+            libdw-dev libelf-dev libgnutls28-dev libncurses-dev libssl-dev \
+            libxml2 libxml2-utils lz4 perl python3 rsync squashfs-tools \
+            xxd zip unzip zlib1g-dev xz-utils zstd
+
+      - name: Download and parse build-manifest.xml
+        run: |
+          set -eux
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -A "Mozilla/5.0" \
+            -o manifest.xml "${{ inputs.manifest_url }}"
+          python3 ci/parse-manifest.py manifest.xml | tee metadata.env
+          cat metadata.env >> "$GITHUB_ENV"
+
+      - name: Download boot.img
+        run: |
+          set -eux
+          mkdir -p bootwork
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 -A "Mozilla/5.0" \
+            -o bootwork/stock-boot.img "${{ inputs.boot_img_url }}"
+          stat -c 'boot.img size=%s' bootwork/stock-boot.img
+          sha256sum bootwork/stock-boot.img | tee bootwork/boot.sha256
+
+      - name: Fetch the manifest mkbootimg
+        env:
+          ONLY: mkbootimg
+        run: bash ci/fetch-manifest-tools.sh
+
+      - name: Unpack boot.img with the AOSP unpack_bootimg.py
+        run: |
+          set -eux
+          mkdir -p bootwork/unpacked
+          PYTHONPATH=tools/mkbootimg python3 tools/mkbootimg/unpack_bootimg.py \
+            --boot_img bootwork/stock-boot.img --out bootwork/unpacked
+          ls -lh bootwork/unpacked
+          test -s bootwork/unpacked/kernel
+
+      - name: Clone kernel and modules at manifest revisions
+        run: |
+          set -eux
+          for repo_sha in "kernel:${KERNEL_REPO}:${KERNEL_SHA}" "sm8750-modules:${MODULES_REPO}:${MODULES_SHA}"; do
+            dir=${repo_sha%%:*}
+            rest=${repo_sha#*:}
+            repo=${rest%%:*}
+            sha=${rest##*:}
+            mkdir -p "$dir"
+            cd "$dir"
+            git init -q
+            git remote add origin "https://github.com/${repo}.git"
+            if ! git fetch --depth 1 --no-tags origin "$sha"; then
+              git fetch --no-tags --depth 200 origin || true
+            fi
+            git checkout -q "$sha" 2>/dev/null || git checkout -q FETCH_HEAD
+            test "$(git rev-parse HEAD)" = "$sha"
+            cd ..
+          done
+          ln -sfn kernel sm8750
+
+      - name: Clone the extra-module sources at the pinned commit
+        run: |
+          set -eux
+          rm -rf extras
+          mkdir -p extras
+          cd extras
+          git init -q
+          git remote add origin "https://github.com/${EXTRAS_REPO}.git"
+          git fetch --depth 1 --no-tags origin "$EXTRAS_SHA"
+          git checkout -q FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$EXTRAS_SHA"
+          test -d extra/devtmpfs
+          test -d extra/net_ip6nat
+          test -d extra/cgrouplimits
+
+      - name: Extract config / release / compiler from boot.img
+        run: |
+          set -eux
+          mkdir -p build-config
+          sh kernel/scripts/extract-ikconfig bootwork/unpacked/kernel > build-config/stock.config
+          test "$(grep -c '^CONFIG_' build-config/stock.config)" -gt 1000
+
+          rel=$(strings bootwork/unpacked/kernel | grep -m1 'Linux version ' | sed -n 's/.*Linux version \([^ ]*\).*/\1/p')
+          clang_raw=$(strings bootwork/unpacked/kernel | grep -m1 'based on r[0-9]' | sed -n 's/.*based on \(r[0-9]*\).*/\1/p')
+          test -n "$rel"
+          test -n "$clang_raw"
+          echo "EXPECTED_RELEASE=$rel" >> "$GITHUB_ENV"
+          echo "EXPECTED_CLANG=$clang_raw" >> "$GITHUB_ENV"
+          echo "CLANG_REV=clang-$clang_raw" >> "$GITHUB_ENV"
+
+          mm=$(printf '%s' "$rel" | sed -n 's/^\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+          case "$mm" in
+            6.6)  kmi=android15-6.6 ;;
+            6.12) kmi=android16-6.12 ;;
+            6.1)  kmi=android14-6.1 ;;
+            5.15) kmi=android14-5.15 ;;
+            5.10) kmi=android13-5.10 ;;
+            6.18) kmi=android17-6.18 ;;
+            *) echo "::error::unsupported kernel $rel"; exit 1 ;;
+          esac
+          echo "KMI=$kmi" >> "$GITHUB_ENV"
+          echo "release=$rel clang=$clang_raw kmi=$kmi"
+
+      - name: Restore manifest tools cache
+        id: tools-cache
+        uses: actions/cache@v4
+        with:
+          path: tools
+          key: hummer-manifest-tools-${{ hashFiles('metadata.env') }}-${{ env.CLANG_REV }}-v1
+
+      - name: Fetch the rest of the manifest tools
+        if: ${{ steps.tools-cache.outputs.cache-hit != 'true' }}
+        run: bash ci/fetch-manifest-tools.sh
+
+      - name: Save manifest tools cache
+        if: ${{ steps.tools-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: tools
+          key: hummer-manifest-tools-${{ hashFiles('metadata.env') }}-${{ env.CLANG_REV }}-v1
+
+      - name: Ensure pahole is available
+        run: |
+          set -eux
+          if [ -x tools/kernel-build-tools/bin/pahole ]; then
+            tools/kernel-build-tools/bin/pahole --version
+          elif [ -x tools/build-tools/bin/pahole ]; then
+            tools/build-tools/bin/pahole --version
+          elif command -v pahole >/dev/null 2>&1; then
+            pahole --version
+          else
+            echo "::warning::manifest prebuilts have no pahole; installing dwarves from Ubuntu"
+            sudo apt-get install -y --no-install-recommends dwarves
+            pahole --version
+          fi
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: hummer-manifest-ccache-${{ hashFiles('metadata.env', 'build-config/stock.config') }}
+          restore-keys: |
+            hummer-manifest-ccache-
+
+      - name: Build exact KDIR on the runner
+        run: |
+          set -eux
+          mkdir -p .ccache
+          export CCACHE_DIR="$PWD/.ccache"
+          export CCACHE_BASEDIR="$PWD"
+          export CCACHE_COMPRESS=1
+          export CCACHE_MAXSIZE=5G
+          bash ci/build-kdir-host.sh
+
+      - name: Save ccache even if a later step fails
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: hummer-manifest-ccache-${{ hashFiles('metadata.env', 'build-config/stock.config') }}-${{ github.run_id }}
+
+      - name: Build phDroid LKM (native + main PID backends)
+        run: |
+          set -eux
+          export CCACHE_DIR="$PWD/.ccache"
+          export CCACHE_BASEDIR="$PWD"
+          export CCACHE_COMPRESS=1
+          export CCACHE_MAXSIZE=5G
+          export KERNELRELEASE="$EXPECTED_RELEASE"
+          export VER="$KMI"
+          export DROID_LKM_NATIVE_PID=1
+          export DROID_LKM_PID_BOTH=1
+          bash ci/build-lkm-host.sh
+
+      - name: Build the extra modules against the exact KDIR
+        run: |
+          set -eux
+          KDIR="$PWD/kernel/out" \
+          KSRC="$PWD/kernel" \
+          EXTRAS="$PWD/extras" \
+          OUT="$PWD/out/$KMI" \
+          STOCK_CONFIG="$PWD/build-config/stock.config" \
+          CLANG_DIR="$PWD/tools/clang" \
+          bash ci/build-extra-modules.sh
+
+      - name: Patch package for hummer
+        env:
+          SAFE_MODE: ${{ inputs.safe_mode }}
+          CONFIG_PATH: build-config/stock.config
+        run: bash ci/patch-package.sh
+
+      - name: Add only the built extra modules to config.conf
+        run: |
+          set -eux
+          base=$(sed -n 's/^modules=//p' module/config.conf | tail -n 1)
+          extras=$(tr '\n' ' ' < "out/$KMI/extra-modules.list" | sed 's/[[:space:]]*$//')
+          echo "base modules : ${base}"
+          echo "extra modules: ${extras:-none}"
+          if [ -n "$extras" ]; then
+            sed -i "s/^modules=.*/modules=${base} ${extras}/" module/config.conf
+          fi
+          case " $extras " in
+            *" devtmpfs_lkm "*)
+              grep -q '^devtmpfs_lkm=' module/config.conf || echo 'devtmpfs_lkm=devtmpfs_probe=2' >> module/config.conf
+              ;;
+          esac
+          if [ -n "$extras" ]; then
+            sed -i 's/^version=.*/&+extras/' module/module.prop
+            sed -i 's|^description=.*|& + extras (only the ones missing from the stock config)|' module/module.prop
+          fi
+          cat module/config.conf
+          cat module/module.prop
+
+      - name: Package KernelSU zip
+        run: |
+          set -eux
+          bash ci/package.sh
+          ls -lh dist
+          sha256sum dist/*.zip
+
+      - name: Verify the package carries every built module
+        run: |
+          set -eux
+          unzip -l dist/*.zip | sed -n '1,80p'
+          n=$(ls out/"$KMI"/*.ko | wc -l)
+          z=$(unzip -l dist/*.zip | grep -c '\.ko$')
+          echo "built .ko: $n | .ko in zip: $z"
+          test "$n" -eq "$z"
+          for k in out/"$KMI"/*.ko; do
+            m=$(basename "$k" .ko)
+            unzip -l dist/*.zip | grep -q "/$m\.ko"
+          done
+          echo "==> extra modules in this package:"
+          cat "out/$KMI/extra-modules.list"
+
+      - name: Write build info
+        run: |
+          set -eux
+          {
+            echo "device:        OnePlus Ace 5 Pro (hummer)"
+            echo "manifest:      ${{ inputs.manifest_url }}"
+            echo "boot img:      ${{ inputs.boot_img_url }}"
+            echo "boot sha256:   $(awk '{print $1}' bootwork/boot.sha256)"
+            echo "kernel:        ${KERNEL_REPO} @ ${KERNEL_SHA}"
+            echo "modules:       ${MODULES_REPO} @ ${MODULES_SHA}"
+            echo "devicetrees:   ${DEVICETREES_SHA:-}"
+            echo "release:       ${EXPECTED_RELEASE}"
+            echo "clang project: ${CLANG_PROJECT_SHA:-}"
+            echo "build-tools:   ${BUILDTOOLS_SHA:-}"
+            echo "kernel-tools:  ${KERNEL_BUILDTOOLS_SHA:-}"
+            echo "mkbootimg:     ${MKBOOTIMG_SHA:-}"
+            echo "clang:         $(tools/clang/bin/clang --version | head -n1)"
+            echo "make:          $(tools/build-tools/bin/make --version | head -n1 || true)"
+            echo "pahole:        $(pahole --version 2>/dev/null || tools/kernel-build-tools/bin/pahole --version 2>/dev/null || echo unknown)"
+            echo "KMI:           ${KMI}"
+            echo "PID backends:  native+main (default main)"
+            echo "extras:        ${EXTRAS_REPO} @ ${EXTRAS_SHA}"
+            echo "extras built:  $(tr '\n' ' ' < out/"$KMI"/extra-modules.list)"
+            echo "safe mode:     ${{ inputs.safe_mode }}"
+            echo
+            echo "build-id:"
+            cat module/build-id.txt
+            echo
+            echo "module sha256:"
+            find out -maxdepth 2 -name '*.ko' -exec sha256sum {} + | sort
+            echo
+            echo "vermagic:"
+            for k in out/*/*.ko; do printf '%s: ' "$k"; strings "$k" | grep -m1 'vermagic=' || true; done
+            echo
+            echo "zip sha256:"
+            sha256sum dist/*.zip
+          } > build-info-manifest.txt
+          cat build-info-manifest.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: phdroid-ota-manifest-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            dist/*.zip
+            out/*/*.ko
+            module/build-id.txt
+            module/module.prop
+            module/config.conf
+            build-config/stock.config
+            build-info-manifest.txt
+
+      - name: Publish release
+        if: ${{ inputs.publish_release }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eux
+          tag="phdroid-ota-manifest-${GITHUB_RUN_ID}"
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/*.zip build-info-manifest.txt -R "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" dist/*.zip build-info-manifest.txt \
+              -R "$GITHUB_REPOSITORY" \
+              --title "phDroid OTA + extras, manifest tools ${EXPECTED_RELEASE} (${GITHUB_RUN_ID})" \
+              --notes-file build-info-manifest.txt
+          fi
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" --json url -q .url

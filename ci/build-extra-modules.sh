@@ -24,11 +24,12 @@ OUT=${OUT:?OUT is required}
 STOCK_CONFIG=${STOCK_CONFIG:-/work/build-config/stock.config}
 NPROC=$(nproc 2>/dev/null || echo 4)
 
-# The KDIR was built with the stock clang staged at /work/clang-stock. An
-# external module must use the same compiler or the kernel headers fail on
-# attributes the container's default clang does not know (__counted_by with
-# clang 18, for example).
-if [ -x /work/clang-stock/bin/clang ]; then
+# The KDIR was built with the toolchain staged by the workflow. An external
+# module must use the same compiler or the kernel headers fail on attributes the
+# other clang does not know (__counted_by with clang 18, for example).
+if [ -n "${CLANG_DIR:-}" ] && [ -x "$CLANG_DIR/bin/clang" ]; then
+	export PATH="$CLANG_DIR/bin:$PATH"
+elif [ -x /work/clang-stock/bin/clang ]; then
 	export PATH="/work/clang-stock/bin:$PATH"
 fi
 export ARCH=arm64

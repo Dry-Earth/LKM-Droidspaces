@@ -32,6 +32,12 @@ devicetrees = find("LineageOS/android_kernel_oneplus_sm8750-devicetrees", "kerne
     or find(path_kw="sm8750-devicetrees")
 clang = find("platform/prebuilts/clang/host/linux-x86", "prebuilts/clang/host/linux-x86") \
     or find(path_kw="prebuilts/clang/host/linux-x86")
+buildtools = find("platform/prebuilts/build-tools", "prebuilts/build-tools") \
+    or find(path_kw="prebuilts/build-tools")
+kernel_buildtools = find("kernel/prebuilts/build-tools", "prebuilts/kernel-build-tools") \
+    or find(path_kw="prebuilts/kernel-build-tools")
+mkbootimg = find("platform/system/tools/mkbootimg", "system/tools/mkbootimg") \
+    or find(path_kw="system/tools/mkbootimg")
 
 def out(key, p):
     if not p or not p["revision"]:
@@ -49,5 +55,16 @@ if devicetrees and devicetrees["revision"]:
 if clang and clang["revision"]:
     print(f"CLANG_PROJECT_SHA={clang['revision']}")
 else:
-    print("::warning::clang prebuilt project not found in manifest; will use branch fallback", file=sys.stderr)
+    print("::warning::clang prebuilt project not found in manifest", file=sys.stderr)
     print("CLANG_PROJECT_SHA=")
+
+for key, project in (("BUILDTOOLS", buildtools),
+                     ("KERNEL_BUILDTOOLS", kernel_buildtools),
+                     ("MKBOOTIMG", mkbootimg)):
+    if project and project["revision"]:
+        print(f"{key}_SHA={project['revision']}")
+        print(f"{key}_NAME={project['name']}")
+        print(f"{key}_PATH={project['path']}")
+    else:
+        print(f"::warning::{key} project not found in manifest", file=sys.stderr)
+        print(f"{key}_SHA=")
