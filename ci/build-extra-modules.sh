@@ -24,6 +24,25 @@ OUT=${OUT:?OUT is required}
 STOCK_CONFIG=${STOCK_CONFIG:-/work/build-config/stock.config}
 NPROC=$(nproc 2>/dev/null || echo 4)
 
+# The KDIR was built with the stock clang staged at /work/clang-stock. An
+# external module must use the same compiler or the kernel headers fail on
+# attributes the container's default clang does not know (__counted_by with
+# clang 18, for example).
+if [ -x /work/clang-stock/bin/clang ]; then
+	export PATH="/work/clang-stock/bin:$PATH"
+fi
+export ARCH=arm64
+export LLVM=1
+export LLVM_IAS=1
+export CROSS_COMPILE=aarch64-linux-gnu-
+clang --version | head -n1
+if [ -n "${EXPECTED_CLANG:-}" ]; then
+	clang --version | grep -q "$EXPECTED_CLANG" || {
+		echo "::error::clang does not match $EXPECTED_CLANG"
+		exit 1
+	}
+fi
+
 if [ ! -s "$STOCK_CONFIG" ]; then
 	if [ -s "$KDIR/.config" ]; then
 		STOCK_CONFIG="$KDIR/.config"

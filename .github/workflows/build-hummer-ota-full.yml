@@ -270,6 +270,7 @@ jobs:
             -e EXTRAS=/work/extras \
             -e OUT=/work/out/"$KMI" \
             -e STOCK_CONFIG=/work/build-config/stock.config \
+            -e EXPECTED_CLANG \
             "$DDK_IMAGE" \
             bash /work/ci/build-extra-modules.sh
 
