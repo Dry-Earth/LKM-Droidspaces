@@ -10,17 +10,21 @@
 
 #include "core.h"
 #include "btf.h"
+#include "hint.h"
 #include "ds_compat.h"
 #include "hk_patch.h"
 #include "type_info.h"
+
+#define DS_COMPAT_NONGKI_SCAN_BACK	(8UL * 1024 * 1024)
+#define DS_COMPAT_NONGKI_SCAN_FWD	(8UL * 1024 * 1024)
 
 static const char *ds_compat_module = "droid_lkm";
 static const char *ds_compat_own_prefix = "";
 
 #define ds_compat_info(fmt, ...)                                               \
-	pr_info("[%s] " fmt, ds_compat_module, ##__VA_ARGS__)
+	pr_info("[I] [%s] " fmt, ds_compat_module, ##__VA_ARGS__)
 #define ds_compat_warn(fmt, ...)                                               \
-	pr_warn("[%s] " fmt, ds_compat_module, ##__VA_ARGS__)
+	pr_warn("[W] [%s] " fmt, ds_compat_module, ##__VA_ARGS__)
 
 int ds_compat_init(const char *module, const char *own_prefix)
 {
@@ -30,6 +34,22 @@ int ds_compat_init(const char *module, const char *own_prefix)
 		ds_compat_own_prefix = own_prefix;
 
 	find_kallsyms_base();
+	if (!klnum_val || !kallrecon_klp) {
+		enum kallrecon_fail reason = kallrecon_fail_reason();
+
+		if (reason == KALLRECON_NO_OFFSETS ||
+		    (reason == KALLRECON_OK && !kloffs_addr && kltable_addr)) {
+			struct kallrecon_hint hint = {
+				.scan_back = DS_COMPAT_NONGKI_SCAN_BACK,
+				.scan_fwd = DS_COMPAT_NONGKI_SCAN_FWD,
+			};
+
+			ds_compat_warn("kallsyms default scan failed (reason=%d), suspect non-GKI kernel, widening scan window to 8MiB\n",
+				       reason);
+			kallrecon_supply(&hint);
+			kallrecon_retry();
+		}
+	}
 	if (!klnum_val || !kallrecon_klp) {
 		ds_compat_warn("kallsyms recovery failed, nothing can be resolved\n");
 		return -ENODATA;
@@ -164,7 +184,7 @@ bool ds_compat_layout_init(struct ds_compat_layout *l)
 
 	ds_compat_layout_unverified(l);
 
-	if (ti_init(&res)) {
+	if (!ti_ready() && ti_init(&res)) {
 		ds_compat_warn("layout: type info refused to start, every offset is refused\n");
 		return false;
 	}
@@ -237,6 +257,11 @@ bool ds_compat_layout_init(struct ds_compat_layout *l)
 	}
 
 	return !missing;
+}
+
+void ds_compat_layout_exit(void)
+{
+	ti_exit();
 }
 
 void ds_compat_layout_fallback(struct ds_compat_layout *l)

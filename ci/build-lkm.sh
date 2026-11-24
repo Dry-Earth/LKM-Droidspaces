@@ -1,6 +1,6 @@
 #!/bin/bash
-# 用精确 6.6.144 KDIR + 原厂 clang r596125 编译上游 _patchHarmony 9f65632。
-# 默认开启 native PID（fix panic / fix pid cache 的 native 路径）。
+# 用精�?6.6.144 KDIR + 原厂 clang r596125 编译上游 _patchHarmony 9f65632�?
+# 默认开�?native PID（fix panic / fix pid cache �?native 路径）�?
 set -euxo pipefail
 
 export PATH="/work/clang-stock/bin:$PATH"
@@ -38,16 +38,19 @@ fetch() {
   git -C "deps/$name" checkout -q "$rev"
   echo "  $name @ $(git -C "deps/$name" rev-parse --short HEAD)"
 }
-fetch KallRecon b258fb6
-fetch Type_info 7182dae
-fetch KernCall  cdec722
-fetch HooKern   7a02afa
+while read -r name rev; do
+  case "$name" in ""|"#"*) continue ;; esac
+  [ "$name" = "vendorcompat" ] && continue
+  [ -n "$rev" ] || continue
+  fetch "$name" "$rev"
+done < /work/deps.lst
 
-base="https://raw.githubusercontent.com/ai-luo2006/droidspaces-6.12-pmb110/main/src/droid_lkm/.sdk/builtin/vendorcompat"
-curl -fsSL "$base/deps.mk" -o .sdk/builtin/vendorcompat/deps.mk
-curl -fsSL "$base/lib/vendorcompat.c" -o .sdk/builtin/vendorcompat/lib/vendorcompat.c
-curl -fsSL "$base/lib/vendorcompat.h" -o .sdk/builtin/vendorcompat/lib/vendorcompat.h
-
+# vendorcompat comes from the KMSDK revision pinned in .sdk-version
+SDKREV=$(cat /work/.sdk-version)
+vc="https://raw.githubusercontent.com/Dere3046/KMSDK/$SDKREV/builtin/vendorcompat"
+curl -fsSL "$vc/deps.mk" -o .sdk/builtin/vendorcompat/deps.mk
+curl -fsSL "$vc/lib/vendorcompat.c" -o .sdk/builtin/vendorcompat/lib/vendorcompat.c
+curl -fsSL "$vc/lib/vendorcompat.h" -o .sdk/builtin/vendorcompat/lib/vendorcompat.h
 echo "==> build LKM (native=$NATIVE) against $KDIR"
 ccache_arg=()
 if command -v ccache >/dev/null 2>&1; then

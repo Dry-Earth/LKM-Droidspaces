@@ -29,6 +29,17 @@ module_param_named(verbose, droid_lkm_verbose, bool, 0444);
 MODULE_PARM_DESC(verbose, "log every hook entry (on-device crash bisect)");
 
 static bool droid_lkm_mqueue_fs_up;
+static bool droid_lkm_ready;
+
+bool droid_lkm_is_ready(void)
+{
+	return droid_lkm_ready;
+}
+
+bool droid_lkm_mqueue_fs_is_up(void)
+{
+	return droid_lkm_mqueue_fs_up;
+}
 
 static const char *const droid_lkm_probe_syms[] = {
 	"do_exit",
@@ -117,17 +128,17 @@ static int __init droid_lkm_init(void)
 
 	ret = droid_lkm_caps_init();
 	if (ret)
-		return ret;
+		goto err_layout;
 	droid_lkm_caps_report();
 
 	ret = droid_lkm_munmap_init();
 	if (ret)
-		return ret;
+		goto err_layout;
 
 	ret = hk_init(&droid_lkm_hk_cfg);
 	if (ret) {
 		droid_lkm_err("hk_init failed: %d\n", ret);
-		return ret;
+		goto err_layout;
 	}
 	/*
 	 * the policy has to reach the engine before the first hook: the route and
@@ -200,10 +211,12 @@ static int __init droid_lkm_init(void)
 		goto err_slot;
 	}
 
+	droid_lkm_ready = true;
 	droid_lkm_info("ready\n");
 	return 0;
 
 err_slot:
+	droid_lkm_ready = false;
 	droid_lkm_features_exit();
 	droid_lkm_proc_exit();
 	droid_lkm_slot_exit();
@@ -216,12 +229,14 @@ err_pidns:
 err_hk:
 	ds_hook_exit();
 	hk_exit();
+err_layout:
+	droid_lkm_layout_exit();
 	return ret;
 }
 
 static void __exit droid_lkm_exit(void)
 {
-
+	droid_lkm_ready = false;
 
 	if (droid_lkm_pidns_busy() || droid_lkm_ipcns_busy())
 		droid_lkm_warn("live container state at unload; those objects will be leaked\n");
@@ -239,6 +254,7 @@ static void __exit droid_lkm_exit(void)
 	droid_lkm_keepalive_release();
 	ds_hook_exit();
 	hk_exit();
+	droid_lkm_layout_exit();
 	droid_lkm_info("unloaded\n");
 }
 

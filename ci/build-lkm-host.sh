@@ -34,24 +34,27 @@ cd "$ROOT"
 echo "==> fetch deps"
 mkdir -p deps .sdk/builtin/vendorcompat/lib
 fetch() {
-	name=$1
-	rev=$2
-	rm -rf "deps/$name"
-	git clone --filter=blob:none "https://github.com/Dere3046/$name" "deps/$name"
-	git -C "deps/$name" fetch --depth 1 origin "$rev" 2>/dev/null || git -C "deps/$name" fetch origin
-	git -C "deps/$name" checkout -q "$rev"
-	echo "  $name @ $(git -C "deps/$name" rev-parse --short HEAD)"
+  name=$1
+  rev=$2
+  rm -rf "deps/$name"
+  git clone --filter=blob:none "https://github.com/Dere3046/$name" "deps/$name"
+  git -C "deps/$name" fetch --depth 1 origin "$rev" 2>/dev/null || git -C "deps/$name" fetch origin
+  git -C "deps/$name" checkout -q "$rev"
+  echo "  $name @ $(git -C "deps/$name" rev-parse --short HEAD)"
 }
-fetch KallRecon b258fb6
-fetch Type_info 7182dae
-fetch KernCall cdec722
-fetch HooKern 7a02afa
+while read -r name rev; do
+  case "$name" in ""|"#"*) continue ;; esac
+  [ "$name" = "vendorcompat" ] && continue
+  [ -n "$rev" ] || continue
+  fetch "$name" "$rev"
+done < "$ROOT"/deps.lst
 
-base="https://raw.githubusercontent.com/ai-luo2006/droidspaces-6.12-pmb110/main/src/droid_lkm/.sdk/builtin/vendorcompat"
-curl -fsSL "$base/deps.mk" -o .sdk/builtin/vendorcompat/deps.mk
-curl -fsSL "$base/lib/vendorcompat.c" -o .sdk/builtin/vendorcompat/lib/vendorcompat.c
-curl -fsSL "$base/lib/vendorcompat.h" -o .sdk/builtin/vendorcompat/lib/vendorcompat.h
-
+# vendorcompat comes from the KMSDK revision pinned in .sdk-version
+SDKREV=$(cat "$ROOT"/.sdk-version)
+vc="https://raw.githubusercontent.com/Dere3046/KMSDK/$SDKREV/builtin/vendorcompat"
+curl -fsSL "$vc/deps.mk" -o .sdk/builtin/vendorcompat/deps.mk
+curl -fsSL "$vc/lib/vendorcompat.c" -o .sdk/builtin/vendorcompat/lib/vendorcompat.c
+curl -fsSL "$vc/lib/vendorcompat.h" -o .sdk/builtin/vendorcompat/lib/vendorcompat.h
 echo "==> build LKM (native=$NATIVE) against $KDIR"
 ccache_arg=()
 if command -v ccache >/dev/null 2>&1; then

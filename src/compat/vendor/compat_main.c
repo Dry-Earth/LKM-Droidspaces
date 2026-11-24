@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+﻿// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2026 Dere3046
  */
@@ -35,7 +35,7 @@ static int __init droid_lkm_vendor_init(void)
 
 	ret = hk_init(&dlc_hk_cfg);
 	if (ret) {
-		pr_err("[droid_lkm_vendor] hk_init failed: %d\n", ret);
+		pr_err("[E] [droid_lkm_vendor] hk_init failed: %d\n", ret);
 		return ret;
 	}
 
@@ -44,16 +44,18 @@ static int __init droid_lkm_vendor_init(void)
 	// the fixup is why this module exists
 	// a silent miss leaves vendor callers with NULL
 	ret = dlc_ghost_init();
+	if (ret) {
+		pr_err("[E] [droid_lkm_vendor] ghost: refusing to load, hook not installed (%d); ghost=0 turns the fixup off\n",
+		       ret);
+		ds_hook_exit();
+		hk_exit();
+		ds_compat_layout_exit();
+		return ret;
+	}
 
 	/* vendor ddl history bounds */
 	(void)dlc_ddl_hit_init();
-	if (ret) {
-		pr_err("[droid_lkm_vendor] ghost: refusing to load, hook not installed (%d); ghost=0 turns the fixup off\n",
-		       ret);
-		hk_exit();
-		return ret;
-	}
-	pr_info("[droid_lkm_vendor] ready\n");
+	pr_info("[I] [droid_lkm_vendor] ready\n");
 	return 0;
 }
 
@@ -63,6 +65,7 @@ static void __exit droid_lkm_vendor_exit(void)
 	dlc_ghost_exit();
 	ds_hook_exit();
 	hk_exit();
+	ds_compat_layout_exit();
 }
 
 module_init(droid_lkm_vendor_init);

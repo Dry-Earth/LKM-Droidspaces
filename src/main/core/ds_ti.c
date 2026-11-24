@@ -169,8 +169,8 @@ static void droid_lkm_layout_manual(struct ds_compat_layout *l)
 			break;
 		}
 		if (!found)
-			pr_warn("[droid_lkm] manual table: %s.%s not in the layout\n",
-				m->type, m->member);
+			droid_lkm_warn("manual table: %s.%s not in the layout\n",
+				       m->type, m->member);
 	}
 	for (i = 0; droid_lkm_manual_types[i].type; i++) {
 		const struct droid_lkm_manual_type *m = &droid_lkm_manual_types[i];
@@ -185,8 +185,8 @@ static void droid_lkm_layout_manual(struct ds_compat_layout *l)
 			break;
 		}
 		if (!found)
-			pr_warn("[droid_lkm] manual table: sizeof(%s) not in the layout\n",
-				m->type);
+			droid_lkm_warn("manual table: sizeof(%s) not in the layout\n",
+				       m->type);
 	}
 }
 #endif
@@ -276,14 +276,37 @@ static bool droid_lkm_layout_required_ok(void)
 
 	for (i = 0; i < ARRAY_SIZE(req); i++) {
 		if (!droid_lkm_layout_field_verified(req[i].type, req[i].member)) {
-			pr_info("[droid_lkm] layout: required %s.%s is not verified\n",
-				req[i].type, req[i].member);
+			droid_lkm_info("layout: required %s.%s is not verified\n",
+				       req[i].type, req[i].member);
 			return false;
 		}
 	}
 	if (!droid_lkm_layout_type_verified(DROID_LKM_T_UPID) ||
 	    !droid_lkm_layout_type_verified(DROID_LKM_T_PID_NAMESPACE)) {
-		pr_info("[droid_lkm] layout: required type size is not verified\n");
+		droid_lkm_info("layout: required type size is not verified\n");
+		return false;
+	}
+	return true;
+}
+
+bool droid_lkm_layout_ipcns_ok(u8 need)
+{
+	unsigned int i;
+
+	if (!droid_lkm_layout_type_ok(DROID_LKM_T_IPC_IDS))
+		return false;
+
+	for (i = 0; i < DROID_LKM_FIELD_COUNT; i++) {
+		const struct ds_compat_field *f = &droid_lkm_fields[i];
+
+		if (strcmp(f->type, "ipc_namespace"))
+			continue;
+		if (f->need != DS_COMPAT_NEED_ANY && f->need != need)
+			continue;
+		if (droid_lkm_layout_ok(i))
+			continue;
+		droid_lkm_info("layout: %s.%s is not verified\n",
+			       f->type, f->member);
 		return false;
 	}
 	return true;
@@ -343,7 +366,12 @@ void droid_lkm_layout_init(void)
 #endif
 	droid_lkm_layout_trusted_flag = droid_lkm_layout_required_ok();
 	if (!droid_lkm_layout_trusted_flag)
-		pr_warn("[droid_lkm] layout: kernel owned fields are not verified, namespace features stay off\n");
+		droid_lkm_warn("layout: kernel owned fields are not verified, namespace features stay off\n");
+}
+
+void droid_lkm_layout_exit(void)
+{
+	ds_compat_layout_exit();
 }
 
 bool droid_lkm_layout_trusted(void)

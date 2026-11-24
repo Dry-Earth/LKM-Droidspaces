@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+﻿// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2026 Dere3046
  */
@@ -38,9 +38,12 @@ struct ds_hook {
 void ds_hook_policy_apply(void);
 
 const char *ds_hook_route_name(enum ds_hook_route route);
+const char *ds_hook_mode_name(void);
 
 /* a slot that refuses the write falls through to the function routes */
 int ds_hook_install(struct ds_hook *h, const char *sym, const char *wrap);
+int ds_hook_install_guard(struct ds_hook *h, const char *sym, const char *wrap,
+			  enum hk_redir_guard guard);
 int ds_hook_install_text(struct ds_hook *h, const char *sym, const char *wrap);
 int ds_hook_install_kprobe(struct ds_hook *h, const char *sym,
 			   const char *wrap);

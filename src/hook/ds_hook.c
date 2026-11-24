@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+﻿// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2026 Dere3046
  */
@@ -17,8 +17,8 @@
 
 #define DS_HOOK_TAG "droid_lkm/hook"
 
-#define ds_hook_info(fmt, ...) pr_info("[" DS_HOOK_TAG "] " fmt, ##__VA_ARGS__)
-#define ds_hook_warn(fmt, ...) pr_warn("[" DS_HOOK_TAG "] " fmt, ##__VA_ARGS__)
+#define ds_hook_info(fmt, ...) pr_info("[I] [" DS_HOOK_TAG "] " fmt, ##__VA_ARGS__)
+#define ds_hook_warn(fmt, ...) pr_warn("[W] [" DS_HOOK_TAG "] " fmt, ##__VA_ARGS__)
 
 /*
  * 0 asks the kernel on every install, 1 takes only the entry write, 2 takes only
@@ -58,6 +58,15 @@ const char *ds_hook_route_name(enum ds_hook_route route)
 	return names[route];
 }
 
+const char *ds_hook_mode_name(void)
+{
+	if (ds_hook_mode == DS_HOOK_TEXT_ONLY)
+		return "text";
+	if (ds_hook_mode == DS_HOOK_KPROBE_ONLY)
+		return "kprobe";
+	return "auto";
+}
+
 // every install lands here so the load report can name the ones that failed
 #define DS_HOOK_RECORDS 8
 
@@ -80,12 +89,19 @@ static void ds_hook_track(struct ds_hook *h)
 }
 
 static int ds_hook_route_install(struct ds_hook *h, const char *sym,
-				 const char *wrap, enum ds_hook_route route)
+				 const char *wrap, enum ds_hook_route route,
+				 enum hk_redir_guard guard)
 {
 	enum hk_redir_how how = route == DS_HOOK_TEXT ? HK_REDIR_TEXT :
 							 HK_REDIR_KPROBE;
 	int ret;
 
+	if (route == DS_HOOK_TEXT) {
+		h->own.ret_mode = HK_INLINE_RET_X17;
+	} else {
+		h->own.adjust = hk_kprobe_adjust_pad;
+		h->own.guard = guard;
+	}
 	ret = hk_redir_install(&h->own, sym, wrap, how);
 	if (ret)
 		return ret;
@@ -97,12 +113,18 @@ static int ds_hook_route_install(struct ds_hook *h, const char *sym,
 	return 0;
 }
 
-static int ds_hook_auto(struct ds_hook *h, const char *sym, const char *wrap)
+static int ds_hook_auto(struct ds_hook *h, const char *sym, const char *wrap,
+			enum hk_redir_guard guard)
 {
+	struct vc_opts opts = {
+		.adjust = hk_kprobe_adjust_pad,
+		.guard = guard,
+		.ret_mode = HK_INLINE_RET_X17,
+	};
 	struct vc_result res;
 	int ret;
 
-	ret = vc_install(sym, wrap, &res);
+	ret = vc_install_ex(sym, wrap, &opts, &res);
 	if (ret) {
 		ds_hook_warn("hook %s: no route took it (%d)\n", sym, ret);
 		return ret;
@@ -123,24 +145,28 @@ static int ds_hook_auto(struct ds_hook *h, const char *sym, const char *wrap)
 	return 0;
 }
 
-int ds_hook_install(struct ds_hook *h, const char *sym, const char *wrap)
+int ds_hook_install_guard(struct ds_hook *h, const char *sym, const char *wrap,
+			  enum hk_redir_guard guard)
 {
 	int ret;
 
 	if (!h || !sym || !wrap)
+		return -EINVAL;
+	if (guard != HK_REDIR_GUARD_TASK && guard != HK_REDIR_GUARD_CALLER)
 		return -EINVAL;
 	memset(h, 0, sizeof(*h));
 	h->name = sym;
 
 	switch (ds_hook_mode) {
 	case DS_HOOK_KPROBE_ONLY:
-		ret = ds_hook_route_install(h, sym, wrap, DS_HOOK_KPROBE);
+		ret = ds_hook_route_install(h, sym, wrap, DS_HOOK_KPROBE,
+					    guard);
 		break;
 	case DS_HOOK_TEXT_ONLY:
-		ret = ds_hook_route_install(h, sym, wrap, DS_HOOK_TEXT);
+		ret = ds_hook_route_install(h, sym, wrap, DS_HOOK_TEXT, guard);
 		break;
 	default:
-		ret = ds_hook_auto(h, sym, wrap);
+		ret = ds_hook_auto(h, sym, wrap, guard);
 		break;
 	}
 
@@ -151,6 +177,11 @@ int ds_hook_install(struct ds_hook *h, const char *sym, const char *wrap)
 	ds_hook_info("hook %s on the %s route (entry 0x%016lx orig 0x%016lx)\n",
 		     sym, ds_hook_route_name(h->route), h->addr, h->orig);
 	return 0;
+}
+
+int ds_hook_install(struct ds_hook *h, const char *sym, const char *wrap)
+{
+	return ds_hook_install_guard(h, sym, wrap, HK_REDIR_GUARD_TASK);
 }
 
 int ds_hook_install_text(struct ds_hook *h, const char *sym, const char *wrap)
@@ -172,7 +203,8 @@ int ds_hook_install_text(struct ds_hook *h, const char *sym, const char *wrap)
 		return -EOPNOTSUPP;
 	}
 
-	ret = ds_hook_route_install(h, sym, wrap, DS_HOOK_TEXT);
+	ret = ds_hook_route_install(h, sym, wrap, DS_HOOK_TEXT,
+				    HK_REDIR_GUARD_TASK);
 	if (ret) {
 		ds_hook_warn("hook %s: text route failed %d\n", sym, ret);
 		return ret;
@@ -196,7 +228,8 @@ int ds_hook_install_kprobe(struct ds_hook *h, const char *sym,
 	memset(h, 0, sizeof(*h));
 	h->name = sym;
 
-	ret = ds_hook_route_install(h, sym, wrap, DS_HOOK_KPROBE);
+	ret = ds_hook_route_install(h, sym, wrap, DS_HOOK_KPROBE,
+				    HK_REDIR_GUARD_TASK);
 	if (ret) {
 		ds_hook_warn("hook %s: kprobe route failed %d\n", sym, ret);
 		return ret;
