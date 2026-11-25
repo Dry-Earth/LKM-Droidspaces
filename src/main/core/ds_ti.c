@@ -312,28 +312,6 @@ bool droid_lkm_layout_ipcns_ok(u8 need)
 	return true;
 }
 
-bool droid_lkm_layout_ipcns_ok(u8 need)
-{
-	unsigned int i;
-
-	if (!droid_lkm_layout_type_ok(DROID_LKM_T_IPC_IDS))
-		return false;
-
-	for (i = 0; i < DROID_LKM_FIELD_COUNT; i++) {
-		const struct ds_compat_field *f = &droid_lkm_fields[i];
-
-		if (strcmp(f->type, "ipc_namespace"))
-			continue;
-		if (f->need != DS_COMPAT_NEED_ANY && f->need != need)
-			continue;
-		if (droid_lkm_layout_ok(i))
-			continue;
-		pr_info("[droid_lkm] layout: %s.%s is not verified\n",
-			f->type, f->member);
-		return false;
-	}
-	return true;
-}
 
 void droid_lkm_layout_init(void)
 {
