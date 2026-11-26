@@ -214,8 +214,7 @@ droid_lkm_userns_copymntns_wrap(unsigned long flags, struct mnt_namespace *ns,
 	}
 
 	if (droid_lkm_userns_mnt_own(new_ns, user_ns))
-		droid_lkm_misc_err("mount namespace kept the host as owner, mounts in it will fail
-");
+		droid_lkm_misc_err("mount namespace kept the host as owner, mounts in it will fail\n");
 
 	hk_redir_leave(&droid_lkm_userns_copymntns_hook);
 	return new_ns;
