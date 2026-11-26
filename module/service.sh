@@ -265,7 +265,8 @@ install)
 		chmod 0644 "$DATA/config.conf" 2>/dev/null
 		log "config installed from module"
 	fi
-	exit 0
+	main_load
+	exit $?
 	;;
 reset)
 	rm -f "$BLOCK" "$CRASH" "$PEND" "$OK" "$MARK" "$DATA/load.crash" 2>/dev/null
