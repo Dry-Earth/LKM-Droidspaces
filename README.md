@@ -21,7 +21,7 @@
 |---|---|
 | `droid_lkm` | PID / IPC namespace、SYSVIPC、POSIX mqueue，`main` + `native` 双 PID 后端 |
 | `droid_lkm_misc` | 伪造 user namespace（`userns=1`），devtmpfs / xt 部分默认关闭，避免和 extras 重复注册 |
-| `droid_lkm_vendor` | OPPO 厂商兼容修正（safe 包不包含） |
+| `droid_lkm_vendor` | 可选，默认不构建/不加载；LineageOS 上 OPPO 驱动内建，ghost/DDL 基本不触发 |
 | `devtmpfs_lkm` | 注册 devtmpfs（原厂 `CONFIG_DEVTMPFS=n` 时） |
 | `macvlan` | `--net=macvlan` 支持 |
 | `ip6table_nat` | IPv6 NAT |
@@ -33,7 +33,7 @@ extra 模块**按原厂 boot.img 的 config 决定是否编译**：对应 CONFIG
 加载顺序由 `config.conf` 的 `modules=` 决定：
 
 ```
-droid_lkm → droid_lkm_misc → droid_lkm_vendor → devtmpfs_lkm → macvlan
+droid_lkm → droid_lkm_misc → devtmpfs_lkm → macvlan
 → ip6table_nat → droid_lkm_pids → droid_lkm_cpu
 ```
 
