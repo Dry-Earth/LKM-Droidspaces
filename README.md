@@ -158,7 +158,13 @@ App 终端输入 `exit` 或点 × 后整机硬复位，根因是 **KernelSU 的 
 
 > `droid_lkm_misc` 的 userns 是**模拟实现**：`unshare(CLONE_NEWUSER)` 能成功、
 > `/proc/<pid>/ns/user` 存在，但没有真实 `uid_map`/`gid_map` 映射，
-> 不能当作安全边界。需要完整 userns 请用 vendored 实现（`droidspaces-lkm`）。
+> 不能当作安全边界。
+>
+> 需要真实 `user_namespace` 语义（`unshare -Ur`、`uid_map`/`gid_map`、
+> 命名空间内挂载）可以试 `droidspaces-lkm` 的 vendored 实现：它把内核的
+> `user_namespace.c` / `nsproxy.c` 等编进模块，再补齐 `CONFIG_USER_NS=n`
+> 被裁掉的挂接点。但它仍然**不是**原生 `CONFIG_USER_NS=y`，
+> `setns` 和个别内核路径可能不完整，需要实测。
 
 ### 共存
 
