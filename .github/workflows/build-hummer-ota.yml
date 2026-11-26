@@ -1,7 +1,11 @@
-name: Build hummer phDroid from OTA (auto manifest)
+name: "[phDroid] Build from OTA (upstream _patchHarmony)"
 
-# 输入任意 LineageOS OTA �?boot.img + build-manifest.xml�?# 自动解析 kernel/modules/devicetrees/clang 的精�?revision�?# �?boot.img 提取 config / release / clang，然后编�?phDroid 模块�?#
-# 不写�?OTA：以后更新只需要换两个 URL�?
+# 输入任意 LineageOS OTA 的 boot.img + build-manifest.xml，
+# 自动解析 kernel/modules/devicetrees/clang 的精确 revision，
+# 从 boot.img 提取 config / release / clang，然后编译 phDroid 模块。
+#
+# 不写死 OTA：以后更新只需要换两个 URL。
+
 on:
   workflow_dispatch:
     inputs:
@@ -21,7 +25,7 @@ on:
         type: boolean
         default: false
       publish_release:
-        description: '构建成功后发�?Release'
+        description: '构建成功后发布 Release'
         required: true
         type: boolean
         default: true
@@ -209,7 +213,7 @@ jobs:
             "$DDK_IMAGE" \
             bash /work/ci/build-kdir.sh
 
-      - name: Build phDroid LKM (native PID)
+      - name: Build phDroid LKM (native + main PID backends)
         run: |
           set -eux
           docker run --rm \
@@ -220,6 +224,7 @@ jobs:
             -e VER="$KMI" \
             -e EXPECTED_CLANG \
             -e DROID_LKM_NATIVE_PID=1 \
+            -e DROID_LKM_PID_BOTH=1 \
             "$DDK_IMAGE" \
             bash /work/ci/build-lkm.sh
 
@@ -247,6 +252,7 @@ jobs:
           else
             echo "webui/package.json not present; keeping module/webroot"
           fi
+
       - name: Package KernelSU zip
         run: |
           set -eux
@@ -270,7 +276,7 @@ jobs:
             echo "release:       ${EXPECTED_RELEASE}"
             echo "clang:         $(clang-stock/bin/clang --version | head -n1)"
             echo "KMI:           ${KMI}"
-            echo "native PID:    1"
+            echo "PID backends:  native+main (default main)"
             echo "safe mode:     ${{ inputs.safe_mode }}"
             echo
             echo "build-id:"
