@@ -94,14 +94,33 @@ static int droid_lkm_userns_mnt_ops_resolve(void)
 	if (safe_read(&ops, (void *)addr, sizeof(ops)))
 		return -EFAULT;
 
-	if (!ops.name || safe_read(text, ops.name, 4) || memcmp(text, "mnt", 4))
+	if (!ops.name || safe_read(text, ops.name, 4) || memcmp(text, "mnt", 4)) {
+		droid_lkm_misc_warn("mnt ops name mismatch: addr=0x%lx name=%px bytes=%02x %02x %02x %02x kernel_base=0x%lx\n",
+				    addr, ops.name, text[0], text[1], text[2], text[3],
+				    kernel_base);
 		return -EINVAL;
+	}
 
-	if (ops.type != CLONE_NEWNS)
+	if (ops.type != CLONE_NEWNS) {
+		droid_lkm_misc_warn("mnt ops type=%d want=%d\n", ops.type,
+				    (int)CLONE_NEWNS);
 		return -EINVAL;
+	}
 
-	if (!ops.owner || !droid_lkm_userns_is_text((unsigned long)ops.owner))
-		return -EINVAL;
+	if (!ops.owner || !droid_lkm_userns_is_text((unsigned long)ops.owner)) {
+		/*
+		 * kernel_base comes from the KallRecon revision linked into this
+		 * module. If it is stale the window test fails even though the
+		 * owner is a real kernel text pointer, so fall back to the plain
+		 * kernel-address range and report both values.
+		 */
+		droid_lkm_misc_warn("mnt ops owner=%px kernel_base=0x%lx\n",
+				    (void *)ops.owner, kernel_base);
+		if (!ops.owner ||
+		    (unsigned long)ops.owner < 0xffff000000000000UL)
+			return -EINVAL;
+		droid_lkm_misc_warn("mnt ops owner accepted without kernel_base\n");
+	}
 
 	droid_lkm_userns_mnt_ops = (const struct proc_ns_operations *)addr;
 	droid_lkm_userns_mnt_owner = ops.owner;
@@ -227,6 +246,8 @@ int droid_lkm_userns_owner_init(void)
 		return -ENOENT;
 	}
 
+	droid_lkm_misc_warn("owner init: init_user_ns=%px kernel_base=0x%lx\n",
+			    droid_lkm_userns_init_uns, kernel_base);
 	ret = droid_lkm_userns_mnt_ops_resolve();
 	if (ret) {
 		droid_lkm_misc_warn("mntns_operations unusable: %d\n", ret);
