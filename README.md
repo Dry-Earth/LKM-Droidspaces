@@ -138,7 +138,28 @@ config/         hummer 内核配置（OTA 解析失败时兜底）
 
 ## 状态
 
-- App 终端退出导致整机硬复位的问题仍在上游处理中：
-  https://github.com/Dere3046/_patchHarmony/issues/15
-- 该问题与 extra 模块、`main`/`native` PID 后端、`dontaudit` 都无关，已逐一排除。
-- 不要与其它 namespace 实现（例如 `droidspaces_hummer`）同时启用。
+### 终端退出硬复位：已定位，和模块 / 上游无关
+
+App 终端输入 `exit` 或点 × 后整机硬复位，根因是 **KernelSU 的 LKM 模式 root**：
+
+- `main` / `native` PID 后端、text / kprobe 路由、`dontaudit`、userns 都单独复现过
+- 同一内核上另一套 LKM（`droidspaces_lkm`）也复现
+- 换成非 LKM 模式的 root 后不再复位
+- 上游 issue 保留作记录：https://github.com/Dere3046/_patchHarmony/issues/15
+
+### 2026-11-26 验证
+
+设备：OnePlus Ace 5 Pro / LineageOS 24 / `boot-20261120-finasu-v3`
+
+- `droidspaces check` **全绿**，包括 `Sandboxing (user namespaces)`
+- 8 个模块全部加载：
+  `droid_lkm`、`droid_lkm_misc`、`droid_lkm_vendor`、`devtmpfs_lkm`、`macvlan`、`ip6table_nat`、`droid_lkm_pids`、`droid_lkm_cpu`
+- userns 自检里的 `mount tmpfs ... -13` 是 SELinux 对 `u:r:kernel:s0` 的 `mounton` 拒绝，不影响 check
+
+> `droid_lkm_misc` 的 userns 是**模拟实现**：`unshare(CLONE_NEWUSER)` 能成功、
+> `/proc/<pid>/ns/user` 存在，但没有真实 `uid_map`/`gid_map` 映射，
+> 不能当作安全边界。需要完整 userns 请用 vendored 实现（`droidspaces-lkm`）。
+
+### 共存
+
+不要与其它 namespace 实现（`droidspaces_lkm` / `droidspaces_hummer`）同时启用。
