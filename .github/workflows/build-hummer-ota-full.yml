@@ -29,7 +29,7 @@ on:
         type: boolean
         default: false
       publish_release:
-        description: '构建成功后发�?Release'
+        description: '构建成功后发布 Release'
         required: true
         type: boolean
         default: true
@@ -39,7 +39,7 @@ on:
         type: string
         default: 'Dry-Earth/droidspaces-lkm'
       extras_sha:
-        description: 'extra 模块源码的固�?commit'
+        description: 'extra 模块源码的固定 commit'
         required: true
         type: string
         default: '522dc420b5119dcbb97b53ace62f99e1444d84a5'
@@ -320,6 +320,7 @@ jobs:
           else
             echo "webui/package.json not present; keeping module/webroot"
           fi
+
       - name: Package KernelSU zip
         run: |
           set -eux
