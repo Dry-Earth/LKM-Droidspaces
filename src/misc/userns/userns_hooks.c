@@ -222,6 +222,7 @@ static int droid_lkm_userns_hook_one(struct hk_redir *h, const char *sym,
 
 	memset(h, 0, sizeof(*h));
 	h->guard = HK_REDIR_GUARD_TASK;
+	h->adjust = hk_kprobe_adjust_pad;
 	ret = hk_redir_install(h, sym, wrap, HK_REDIR_KPROBE);
 	if (ret) {
 		droid_lkm_misc_warn("hook %s failed: %d
