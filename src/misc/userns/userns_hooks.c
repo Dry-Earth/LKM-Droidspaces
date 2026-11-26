@@ -36,12 +36,12 @@
 #include "misc.h"
 #include "misc_ksym.h"
 #include "userns.h"
-#include "hk_inline.h"
+#include "hk_redir.h"
 
-static struct hk_inline droid_lkm_userns_unshare_hook;
-static struct hk_inline droid_lkm_userns_nsproxy_hook;
-static struct hk_inline droid_lkm_userns_creds_hook;
-static struct hk_inline droid_lkm_userns_inodecap_hook;
+static struct hk_redir droid_lkm_userns_unshare_hook;
+static struct hk_redir droid_lkm_userns_nsproxy_hook;
+static struct hk_redir droid_lkm_userns_creds_hook;
+static struct hk_redir droid_lkm_userns_inodecap_hook;
 
 static int (*droid_lkm_userns_unshare_orig)(unsigned long flags);
 static int (*droid_lkm_userns_nsproxy_orig)(unsigned long unshare_flags,
@@ -63,23 +63,32 @@ __nocfi noinline int droid_lkm_userns_nsproxy_wrap(unsigned long unshare_flags,
 						   struct cred *new_cred,
 						   struct fs_struct *new_fs)
 {
-	struct droid_lkm_userns *u = droid_lkm_userns_of(current);
+	struct droid_lkm_userns *u;
 	struct nsproxy *nsp;
 	int ret;
 
-	if (!u || new_cred || !cap_raised(current_cred()->cap_effective, CAP_SYS_ADMIN))
-		return droid_lkm_userns_nsproxy_orig(unshare_flags, new_nsp, new_cred, new_fs);
+	if (!hk_redir_guard_enter(&droid_lkm_userns_nsproxy_hook))
+		return droid_lkm_userns_nsproxy_orig(unshare_flags, new_nsp,
+						     new_cred, new_fs);
 
-	nsp = droid_lkm_misc_ks.create_new_namespaces(unshare_flags, current, &u->uns,
+	u = droid_lkm_userns_of(current);
+	if (!u || new_cred ||
+	    !cap_raised(current_cred()->cap_effective, CAP_SYS_ADMIN)) {
+		ret = droid_lkm_userns_nsproxy_orig(unshare_flags, new_nsp,
+						    new_cred, new_fs);
+		hk_redir_leave(&droid_lkm_userns_nsproxy_hook);
+		return ret;
+	}
+
+	nsp = droid_lkm_misc_ks.create_new_namespaces(unshare_flags, current,
+						      &u->uns,
 						      new_fs ? new_fs : current->fs);
-	if (IS_ERR(nsp))
-		return PTR_ERR(nsp);
+	if (IS_ERR(nsp)) {
+		ret = PTR_ERR(nsp);
+		hk_redir_leave(&droid_lkm_userns_nsproxy_hook);
+		return ret;
+	}
 
-	/*
-	 * get_user_ns() is a stub returning the initial namespace, so the constructors stored the
-	 * wrong owner. only namespaces this call created are touched, the mount namespace is covered
-	 * by may_mount()
-	 */
 	if (unshare_flags & CLONE_NEWUTS)
 		nsp->uts_ns->user_ns = &u->uns;
 	if (unshare_flags & CLONE_NEWNET)
@@ -90,9 +99,8 @@ __nocfi noinline int droid_lkm_userns_nsproxy_wrap(unsigned long unshare_flags,
 		nsp->time_ns_for_children->user_ns = &u->uns;
 
 	*new_nsp = nsp;
-	ret = 0;
-
-	return ret;
+	hk_redir_leave(&droid_lkm_userns_nsproxy_hook);
+	return 0;
 }
 
 __nocfi noinline int droid_lkm_userns_unshare_wrap(unsigned long flags)
@@ -101,29 +109,40 @@ __nocfi noinline int droid_lkm_userns_unshare_wrap(unsigned long flags)
 	unsigned long rest;
 	int ret;
 
-	if (!(flags & CLONE_NEWUSER))
+	if (!hk_redir_guard_enter(&droid_lkm_userns_unshare_hook))
 		return droid_lkm_userns_unshare_orig(flags);
 
-	/* upstream rejects this pair before it touches anything */
-	if (flags & CLONE_FS)
-		return -EINVAL;
+	if (!(flags & CLONE_NEWUSER)) {
+		ret = droid_lkm_userns_unshare_orig(flags);
+		hk_redir_leave(&droid_lkm_userns_unshare_hook);
+		return ret;
+	}
 
-	/* allocate before the kernel changes anything, so failure is free */
+	if (flags & CLONE_FS) {
+		hk_redir_leave(&droid_lkm_userns_unshare_hook);
+		return -EINVAL;
+	}
+
 	u = droid_lkm_userns_create(droid_lkm_userns_of(current));
-	if (!u)
+	if (!u) {
+		hk_redir_leave(&droid_lkm_userns_unshare_hook);
 		return -ENOMEM;
+	}
 
 	rest = flags & ~CLONE_NEWUSER;
 	ret = droid_lkm_userns_unshare_orig(rest);
 	if (ret) {
 		droid_lkm_userns_destroy(u);
+		hk_redir_leave(&droid_lkm_userns_unshare_hook);
 		return ret;
 	}
 
 	ret = droid_lkm_userns_install_current(u);
 	if (ret)
-		droid_lkm_misc_warn("unshare: credential install failed: %d\n", ret);
+		droid_lkm_misc_warn("unshare: credential install failed: %d
+", ret);
 
+	hk_redir_leave(&droid_lkm_userns_unshare_hook);
 	return ret;
 }
 
@@ -134,24 +153,32 @@ __nocfi noinline int droid_lkm_userns_creds_wrap(struct task_struct *p,
 	unsigned long rest;
 	int ret;
 
-	/* a thread clone shares credentials, so it cannot own a namespace */
-	if (!(clone_flags & CLONE_NEWUSER) || (clone_flags & CLONE_THREAD))
+	if (!hk_redir_guard_enter(&droid_lkm_userns_creds_hook))
 		return droid_lkm_userns_creds_orig(p, clone_flags);
 
+	if (!(clone_flags & CLONE_NEWUSER) || (clone_flags & CLONE_THREAD)) {
+		ret = droid_lkm_userns_creds_orig(p, clone_flags);
+		hk_redir_leave(&droid_lkm_userns_creds_hook);
+		return ret;
+	}
+
 	u = droid_lkm_userns_create(droid_lkm_userns_of(current));
-	if (!u)
+	if (!u) {
+		hk_redir_leave(&droid_lkm_userns_creds_hook);
 		return -ENOMEM;
+	}
 
 	rest = clone_flags & ~CLONE_NEWUSER;
 	ret = droid_lkm_userns_creds_orig(p, rest);
 	if (ret) {
 		droid_lkm_userns_destroy(u);
+		hk_redir_leave(&droid_lkm_userns_creds_hook);
 		return ret;
 	}
 
-	/* the child has not run and copy_creds() built a fresh credential, so this is race free */
 	droid_lkm_userns_install_cred((struct cred *)p->cred, u);
 
+	hk_redir_leave(&droid_lkm_userns_creds_hook);
 	return 0;
 }
 
@@ -160,39 +187,52 @@ __nocfi noinline bool droid_lkm_userns_inodecap_wrap(struct mnt_idmap *idmap,
 						     int cap)
 {
 	struct droid_lkm_userns *u;
+	bool ok;
 
-	if (droid_lkm_userns_inodecap_orig(idmap, inode, cap))
+	if (!hk_redir_guard_enter(&droid_lkm_userns_inodecap_hook))
+		return droid_lkm_userns_inodecap_orig(idmap, inode, cap);
+
+	if (droid_lkm_userns_inodecap_orig(idmap, inode, cap)) {
+		hk_redir_leave(&droid_lkm_userns_inodecap_hook);
 		return true;
+	}
 
-	/* an idmapped mount is a different rule set, it arrives with the lens */
-	if (droid_lkm_misc_ks.nop_mnt_idmap && idmap != droid_lkm_misc_ks.nop_mnt_idmap)
+	if (droid_lkm_misc_ks.nop_mnt_idmap &&
+	    idmap != droid_lkm_misc_ks.nop_mnt_idmap) {
+		hk_redir_leave(&droid_lkm_userns_inodecap_hook);
 		return false;
+	}
 
 	u = droid_lkm_userns_of(current);
-	if (!u)
+	if (!u || !cap_raised(current_cred()->cap_effective, cap)) {
+		hk_redir_leave(&droid_lkm_userns_inodecap_hook);
 		return false;
+	}
 
-	if (!cap_raised(current_cred()->cap_effective, cap))
-		return false;
-
-	/* privileged_wrt_inode_uidgid(): both ids must be mapped in the namespace */
-	return droid_lkm_userns_map_ok(u, __kuid_val(inode->i_uid)) &&
-	       droid_lkm_userns_map_ok(u, __kgid_val(inode->i_gid));
+	ok = droid_lkm_userns_map_ok(u, __kuid_val(inode->i_uid)) &&
+	     droid_lkm_userns_map_ok(u, __kgid_val(inode->i_gid));
+	hk_redir_leave(&droid_lkm_userns_inodecap_hook);
+	return ok;
 }
 
-static int droid_lkm_userns_hook_one(struct hk_inline *h, const char *sym,
+static int droid_lkm_userns_hook_one(struct hk_redir *h, const char *sym,
 				     const char *wrap, void **orig)
 {
 	int ret;
 
-	ret = hk_inline_hook(h, sym, wrap);
+	memset(h, 0, sizeof(*h));
+	h->guard = HK_REDIR_GUARD_TASK;
+	ret = hk_redir_install(h, sym, wrap, HK_REDIR_KPROBE);
 	if (ret) {
-		droid_lkm_misc_warn("hook %s failed: %d\n", sym, ret);
+		droid_lkm_misc_warn("hook %s failed: %d
+", sym, ret);
 		return ret;
 	}
 
 	*orig = (void *)h->orig;
-	droid_lkm_misc_dbg("hook %-28s addr=0x%lx orig=0x%lx\n", sym, h->addr, h->orig);
+	droid_lkm_misc_dbg("hook %-28s addr=0x%lx orig=0x%lx
+", sym, h->addr,
+			   h->orig);
 
 	return 0;
 }
@@ -227,18 +267,18 @@ int droid_lkm_userns_hooks_init(void)
 	return 0;
 
 out_creds:
-	hk_inline_unhook(&droid_lkm_userns_creds_hook);
+	hk_redir_remove(&droid_lkm_userns_creds_hook);
 out_nsproxy:
-	hk_inline_unhook(&droid_lkm_userns_nsproxy_hook);
+	hk_redir_remove(&droid_lkm_userns_nsproxy_hook);
 out_unshare:
-	hk_inline_unhook(&droid_lkm_userns_unshare_hook);
+	hk_redir_remove(&droid_lkm_userns_unshare_hook);
 	return ret;
 }
 
 void droid_lkm_userns_hooks_exit(void)
 {
-	hk_inline_unhook(&droid_lkm_userns_inodecap_hook);
-	hk_inline_unhook(&droid_lkm_userns_creds_hook);
-	hk_inline_unhook(&droid_lkm_userns_nsproxy_hook);
-	hk_inline_unhook(&droid_lkm_userns_unshare_hook);
+	hk_redir_remove(&droid_lkm_userns_inodecap_hook);
+	hk_redir_remove(&droid_lkm_userns_creds_hook);
+	hk_redir_remove(&droid_lkm_userns_nsproxy_hook);
+	hk_redir_remove(&droid_lkm_userns_unshare_hook);
 }
