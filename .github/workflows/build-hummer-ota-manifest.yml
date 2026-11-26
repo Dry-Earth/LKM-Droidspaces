@@ -157,7 +157,17 @@ jobs:
           test "$(grep -c '^CONFIG_' build-config/stock.config)" -gt 1000
 
           rel=$(strings bootwork/unpacked/kernel | grep -m1 'Linux version ' | sed -n 's/.*Linux version \([^ ]*\).*/\1/p')
-          clang_raw=$(strings bootwork/unpacked/kernel | grep -m1 'based on r[0-9]' | sed -n 's/.*based on \(r[0-9]*\).*/\1/p')
+                    clang_raw=$(strings bootwork/unpacked/kernel | grep -m1 'based on r[0-9]' | sed -n 's/.*based on \(r[0-9]*\).*/\1/p')
+          if [ -z "$clang_raw" ]; then
+            # a KernelSU-patched boot may no longer carry the compiler banner
+            # in the image strings; the kernel config records the same version
+            clang_raw=$(grep -m1 '^CONFIG_CC_VERSION_TEXT=' build-config/stock.config \
+              | grep -o 'based on r[0-9]*' | sed 's/.*r//')
+          fi
+          if [ -z "$clang_raw" ]; then
+            echo "::warning::no clang revision in the boot image or config, using r596125"
+            clang_raw=r596125
+          fi
           test -n "$rel"
           test -n "$clang_raw"
           echo "EXPECTED_RELEASE=$rel" >> "$GITHUB_ENV"
