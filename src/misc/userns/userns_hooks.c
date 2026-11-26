@@ -107,8 +107,7 @@ __nocfi noinline int droid_lkm_userns_unshare_wrap(unsigned long flags)
 	unsigned long rest;
 	int ret;
 
-	if (!hk_redir_guard_enter(&droid_lkm_userns_unshare_hook))
-		return droid_lkm_userns_unshare_orig(flags);
+	hk_redir_guard_enter(&droid_lkm_userns_unshare_hook);
 
 	if (!(flags & CLONE_NEWUSER)) {
 		ret = droid_lkm_userns_unshare_orig(flags);
@@ -150,8 +149,7 @@ __nocfi noinline int droid_lkm_userns_creds_wrap(struct task_struct *p,
 	unsigned long rest;
 	int ret;
 
-	if (!hk_redir_guard_enter(&droid_lkm_userns_creds_hook))
-		return droid_lkm_userns_creds_orig(p, clone_flags);
+	hk_redir_guard_enter(&droid_lkm_userns_creds_hook);
 
 	if (!(clone_flags & CLONE_NEWUSER) || (clone_flags & CLONE_THREAD)) {
 		ret = droid_lkm_userns_creds_orig(p, clone_flags);
@@ -186,8 +184,7 @@ __nocfi noinline bool droid_lkm_userns_inodecap_wrap(struct mnt_idmap *idmap,
 	struct droid_lkm_userns *u;
 	bool ok;
 
-	if (!hk_redir_guard_enter(&droid_lkm_userns_inodecap_hook))
-		return droid_lkm_userns_inodecap_orig(idmap, inode, cap);
+	hk_redir_guard_enter(&droid_lkm_userns_inodecap_hook);
 
 	if (droid_lkm_userns_inodecap_orig(idmap, inode, cap)) {
 		hk_redir_leave(&droid_lkm_userns_inodecap_hook);
