@@ -47,7 +47,7 @@
 #include "misc_ksym.h"
 #include "misc_proc.h"
 #include "userns.h"
-#include "hk_inline.h"
+#include "hk_redir.h"
 
 /* last offset of struct mnt_namespace that can still hold its owner */
 #define DROID_LKM_USERNS_MNT_SCAN 128
@@ -58,8 +58,8 @@ typedef struct user_namespace *(*droid_lkm_userns_owner_t)(struct ns_common *ns)
 
 struct user_namespace *droid_lkm_userns_init_uns;
 
-static struct hk_inline droid_lkm_userns_copymntns_hook;
-static struct hk_inline droid_lkm_userns_fsctx_hook;
+static struct hk_redir droid_lkm_userns_copymntns_hook;
+static struct hk_redir droid_lkm_userns_fsctx_hook;
 static struct mnt_namespace *(*droid_lkm_userns_copymntns_orig)(
 		unsigned long flags, struct mnt_namespace *ns,
 		struct user_namespace *user_ns, struct fs_struct *new_fs);
@@ -72,7 +72,7 @@ static unsigned int droid_lkm_userns_mnt_off;
 static bool droid_lkm_userns_is_text(unsigned long addr)
 {
 	return addr >= kernel_base && addr - kernel_base < DROID_LKM_USERNS_TEXT_WIN &&
-	       !(addr & (sizeof(void *) - 1));
+	       !(addr & 3);
 }
 
 /*
@@ -193,21 +193,31 @@ droid_lkm_userns_copymntns_wrap(unsigned long flags, struct mnt_namespace *ns,
 {
 	struct mnt_namespace *new_ns;
 
-	if (!droid_lkm_userns_copymntns_orig)
+	if (!hk_redir_guard_enter(&droid_lkm_userns_copymntns_hook)) {
+		if (!droid_lkm_userns_copymntns_orig)
+			return ERR_PTR(-EAGAIN);
+		return droid_lkm_userns_copymntns_orig(flags, ns, user_ns,
+						       new_fs);
+	}
+
+	if (!droid_lkm_userns_copymntns_orig) {
+		hk_redir_leave(&droid_lkm_userns_copymntns_hook);
 		return ERR_PTR(-EAGAIN);
+	}
 
 	new_ns = droid_lkm_userns_copymntns_orig(flags, ns, user_ns, new_fs);
 
-	if (IS_ERR(new_ns) || !(flags & CLONE_NEWNS))
+	if (IS_ERR(new_ns) || !(flags & CLONE_NEWNS) ||
+	    !droid_lkm_userns_is_ours(user_ns)) {
+		hk_redir_leave(&droid_lkm_userns_copymntns_hook);
 		return new_ns;
-
-	/* user_ns is the owner the kernel was handed, ours only for our own */
-	if (!droid_lkm_userns_is_ours(user_ns))
-		return new_ns;
+	}
 
 	if (droid_lkm_userns_mnt_own(new_ns, user_ns))
-		droid_lkm_misc_err("mount namespace kept the host as owner, mounts in it will fail\n");
+		droid_lkm_misc_err("mount namespace kept the host as owner, mounts in it will fail
+");
 
+	hk_redir_leave(&droid_lkm_userns_copymntns_hook);
 	return new_ns;
 }
 
@@ -217,21 +227,24 @@ droid_lkm_userns_fsctx_wrap(struct file_system_type *type, unsigned int sb_flags
 	struct fs_context *fc;
 	struct droid_lkm_userns *u;
 
-	if (!droid_lkm_userns_fsctx_orig)
+	if (!hk_redir_guard_enter(&droid_lkm_userns_fsctx_hook)) {
+		if (!droid_lkm_userns_fsctx_orig)
+			return ERR_PTR(-EAGAIN);
+		return droid_lkm_userns_fsctx_orig(type, sb_flags);
+	}
+
+	if (!droid_lkm_userns_fsctx_orig) {
+		hk_redir_leave(&droid_lkm_userns_fsctx_hook);
 		return ERR_PTR(-EAGAIN);
+	}
 
 	fc = droid_lkm_userns_fsctx_orig(type, sb_flags);
 
-	/*
-	 * alloc_fs_context() took the owner from current_user_ns() and get_user_ns() took no
-	 * reference, so replacing the field is all
-	 */
 	u = IS_ERR(fc) ? NULL : droid_lkm_userns_of(current);
-	if (u && fc->user_ns != &u->uns) {
+	if (u && fc->user_ns != &u->uns)
 		fc->user_ns = &u->uns;
-		droid_lkm_misc_dbg("fs_context for %s owned by the container\n", type->name);
-	}
 
+	hk_redir_leave(&droid_lkm_userns_fsctx_hook);
 	return fc;
 }
 
@@ -254,19 +267,23 @@ int droid_lkm_userns_owner_init(void)
 		return ret;
 	}
 
-	ret = hk_inline_hook(&droid_lkm_userns_copymntns_hook, "copy_mnt_ns",
-			     "droid_lkm_userns_copymntns_wrap");
+	memset(&droid_lkm_userns_copymntns_hook, 0, sizeof(droid_lkm_userns_copymntns_hook));
+	droid_lkm_userns_copymntns_hook.guard = HK_REDIR_GUARD_TASK;
+	ret = hk_redir_install(&droid_lkm_userns_copymntns_hook, "copy_mnt_ns",
+			       "droid_lkm_userns_copymntns_wrap", HK_REDIR_KPROBE);
 	if (ret) {
 		droid_lkm_misc_warn("hook copy_mnt_ns failed: %d\n", ret);
 		return ret;
 	}
 	droid_lkm_userns_copymntns_orig = (void *)droid_lkm_userns_copymntns_hook.orig;
 
-	ret = hk_inline_hook(&droid_lkm_userns_fsctx_hook, "fs_context_for_mount",
-			     "droid_lkm_userns_fsctx_wrap");
+	memset(&droid_lkm_userns_fsctx_hook, 0, sizeof(droid_lkm_userns_fsctx_hook));
+	droid_lkm_userns_fsctx_hook.guard = HK_REDIR_GUARD_TASK;
+	ret = hk_redir_install(&droid_lkm_userns_fsctx_hook, "fs_context_for_mount",
+			       "droid_lkm_userns_fsctx_wrap", HK_REDIR_KPROBE);
 	if (ret) {
 		droid_lkm_misc_warn("hook fs_context_for_mount failed: %d\n", ret);
-		hk_inline_unhook(&droid_lkm_userns_copymntns_hook);
+		hk_redir_remove(&droid_lkm_userns_copymntns_hook);
 		droid_lkm_userns_copymntns_orig = NULL;
 		return ret;
 	}
@@ -282,11 +299,11 @@ int droid_lkm_userns_owner_init(void)
 void droid_lkm_userns_owner_exit(void)
 {
 	if (droid_lkm_userns_fsctx_orig) {
-		hk_inline_unhook(&droid_lkm_userns_fsctx_hook);
+		hk_redir_remove(&droid_lkm_userns_fsctx_hook);
 		droid_lkm_userns_fsctx_orig = NULL;
 	}
 	if (droid_lkm_userns_copymntns_orig) {
-		hk_inline_unhook(&droid_lkm_userns_copymntns_hook);
+		hk_redir_remove(&droid_lkm_userns_copymntns_hook);
 		droid_lkm_userns_copymntns_orig = NULL;
 	}
 }
