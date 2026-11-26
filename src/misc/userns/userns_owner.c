@@ -269,6 +269,7 @@ int droid_lkm_userns_owner_init(void)
 
 	memset(&droid_lkm_userns_copymntns_hook, 0, sizeof(droid_lkm_userns_copymntns_hook));
 	droid_lkm_userns_copymntns_hook.guard = HK_REDIR_GUARD_TASK;
+	droid_lkm_userns_copymntns_hook.adjust = hk_kprobe_adjust_pad;
 	ret = hk_redir_install(&droid_lkm_userns_copymntns_hook, "copy_mnt_ns",
 			       "droid_lkm_userns_copymntns_wrap", HK_REDIR_KPROBE);
 	if (ret) {
@@ -279,6 +280,7 @@ int droid_lkm_userns_owner_init(void)
 
 	memset(&droid_lkm_userns_fsctx_hook, 0, sizeof(droid_lkm_userns_fsctx_hook));
 	droid_lkm_userns_fsctx_hook.guard = HK_REDIR_GUARD_TASK;
+	droid_lkm_userns_fsctx_hook.adjust = hk_kprobe_adjust_pad;
 	ret = hk_redir_install(&droid_lkm_userns_fsctx_hook, "fs_context_for_mount",
 			       "droid_lkm_userns_fsctx_wrap", HK_REDIR_KPROBE);
 	if (ret) {
