@@ -193,12 +193,7 @@ droid_lkm_userns_copymntns_wrap(unsigned long flags, struct mnt_namespace *ns,
 {
 	struct mnt_namespace *new_ns;
 
-	if (!hk_redir_guard_enter(&droid_lkm_userns_copymntns_hook)) {
-		if (!droid_lkm_userns_copymntns_orig)
-			return ERR_PTR(-EAGAIN);
-		return droid_lkm_userns_copymntns_orig(flags, ns, user_ns,
-						       new_fs);
-	}
+	hk_redir_guard_enter(&droid_lkm_userns_copymntns_hook);
 
 	if (!droid_lkm_userns_copymntns_orig) {
 		hk_redir_leave(&droid_lkm_userns_copymntns_hook);
@@ -226,11 +221,7 @@ droid_lkm_userns_fsctx_wrap(struct file_system_type *type, unsigned int sb_flags
 	struct fs_context *fc;
 	struct droid_lkm_userns *u;
 
-	if (!hk_redir_guard_enter(&droid_lkm_userns_fsctx_hook)) {
-		if (!droid_lkm_userns_fsctx_orig)
-			return ERR_PTR(-EAGAIN);
-		return droid_lkm_userns_fsctx_orig(type, sb_flags);
-	}
+	hk_redir_guard_enter(&droid_lkm_userns_fsctx_hook);
 
 	if (!droid_lkm_userns_fsctx_orig) {
 		hk_redir_leave(&droid_lkm_userns_fsctx_hook);
