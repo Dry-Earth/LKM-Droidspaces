@@ -45,7 +45,7 @@
 #include "misc_ksym.h"
 #include "misc_proc.h"
 #include "userns.h"
-#include "hk_inline.h"
+#include "hk_redir.h"
 
 /* "         0          0 4294967295\n" and room for the setgroups answer */
 #define DROID_LKM_USERNS_MAP_TEXT 64
@@ -70,8 +70,8 @@ static void (*droid_lkm_userns_proc_set_d_op)(struct dentry *dentry,
 		const struct dentry_operations *op);
 static const struct dentry_operations *droid_lkm_userns_proc_dentry_ops;
 
-static struct hk_inline droid_lkm_userns_proc_tgid_hook;
-static struct hk_inline droid_lkm_userns_proc_tid_hook;
+static struct hk_redir droid_lkm_userns_proc_tgid_hook;
+static struct hk_redir droid_lkm_userns_proc_tid_hook;
 static struct dentry *(*droid_lkm_userns_proc_tgid_orig)(struct inode *dir,
 		struct dentry *dentry, unsigned int flags);
 static struct dentry *(*droid_lkm_userns_proc_tid_orig)(struct inode *dir,
@@ -347,22 +347,46 @@ __nocfi noinline struct dentry *
 droid_lkm_userns_proc_tgid_lookup(struct inode *dir, struct dentry *dentry,
 				  unsigned int flags)
 {
-	if (!droid_lkm_userns_proc_tgid_orig)
-		return ERR_PTR(-ENOENT);
+	struct dentry *res;
 
-	return droid_lkm_userns_proc_lookup(dir, dentry, flags,
-					    droid_lkm_userns_proc_tgid_orig);
+	if (!hk_redir_guard_enter(&droid_lkm_userns_proc_tgid_hook)) {
+		if (!droid_lkm_userns_proc_tgid_orig)
+			return ERR_PTR(-ENOENT);
+		return droid_lkm_userns_proc_tgid_orig(dir, dentry, flags);
+	}
+
+	if (!droid_lkm_userns_proc_tgid_orig) {
+		hk_redir_leave(&droid_lkm_userns_proc_tgid_hook);
+		return ERR_PTR(-ENOENT);
+	}
+
+	res = droid_lkm_userns_proc_lookup(dir, dentry, flags,
+					   droid_lkm_userns_proc_tgid_orig);
+	hk_redir_leave(&droid_lkm_userns_proc_tgid_hook);
+	return res;
 }
 
 __nocfi noinline struct dentry *
 droid_lkm_userns_proc_tid_lookup(struct inode *dir, struct dentry *dentry,
 				 unsigned int flags)
 {
-	if (!droid_lkm_userns_proc_tid_orig)
-		return ERR_PTR(-ENOENT);
+	struct dentry *res;
 
-	return droid_lkm_userns_proc_lookup(dir, dentry, flags,
-					    droid_lkm_userns_proc_tid_orig);
+	if (!hk_redir_guard_enter(&droid_lkm_userns_proc_tid_hook)) {
+		if (!droid_lkm_userns_proc_tid_orig)
+			return ERR_PTR(-ENOENT);
+		return droid_lkm_userns_proc_tid_orig(dir, dentry, flags);
+	}
+
+	if (!droid_lkm_userns_proc_tid_orig) {
+		hk_redir_leave(&droid_lkm_userns_proc_tid_hook);
+		return ERR_PTR(-ENOENT);
+	}
+
+	res = droid_lkm_userns_proc_lookup(dir, dentry, flags,
+					   droid_lkm_userns_proc_tid_orig);
+	hk_redir_leave(&droid_lkm_userns_proc_tid_hook);
+	return res;
 }
 
 static int droid_lkm_userns_proc_resolve(void)
@@ -408,19 +432,25 @@ int droid_lkm_userns_proc_init(void)
 	if (ret)
 		return ret;
 
-	ret = hk_inline_hook(&droid_lkm_userns_proc_tgid_hook, "proc_tgid_base_lookup",
-			     "droid_lkm_userns_proc_tgid_lookup");
+	memset(&droid_lkm_userns_proc_tgid_hook, 0, sizeof(droid_lkm_userns_proc_tgid_hook));
+	droid_lkm_userns_proc_tgid_hook.guard = HK_REDIR_GUARD_TASK;
+	droid_lkm_userns_proc_tgid_hook.adjust = hk_kprobe_adjust_pad;
+	ret = hk_redir_install(&droid_lkm_userns_proc_tgid_hook, "proc_tgid_base_lookup",
+			       "droid_lkm_userns_proc_tgid_lookup", HK_REDIR_KPROBE);
 	if (ret) {
 		droid_lkm_misc_warn("hook proc_tgid_base_lookup failed: %d\n", ret);
 		return ret;
 	}
 	droid_lkm_userns_proc_tgid_orig = (void *)droid_lkm_userns_proc_tgid_hook.orig;
 
-	ret = hk_inline_hook(&droid_lkm_userns_proc_tid_hook, "proc_tid_base_lookup",
-			     "droid_lkm_userns_proc_tid_lookup");
+	memset(&droid_lkm_userns_proc_tid_hook, 0, sizeof(droid_lkm_userns_proc_tid_hook));
+	droid_lkm_userns_proc_tid_hook.guard = HK_REDIR_GUARD_TASK;
+	droid_lkm_userns_proc_tid_hook.adjust = hk_kprobe_adjust_pad;
+	ret = hk_redir_install(&droid_lkm_userns_proc_tid_hook, "proc_tid_base_lookup",
+			       "droid_lkm_userns_proc_tid_lookup", HK_REDIR_KPROBE);
 	if (ret) {
 		droid_lkm_misc_warn("hook proc_tid_base_lookup failed: %d\n", ret);
-		hk_inline_unhook(&droid_lkm_userns_proc_tgid_hook);
+		hk_redir_remove(&droid_lkm_userns_proc_tgid_hook);
 		droid_lkm_userns_proc_tgid_orig = NULL;
 		return ret;
 	}
@@ -441,11 +471,11 @@ int droid_lkm_userns_proc_init(void)
 void droid_lkm_userns_proc_exit(void)
 {
 	if (droid_lkm_userns_proc_tid_orig) {
-		hk_inline_unhook(&droid_lkm_userns_proc_tid_hook);
+		hk_redir_remove(&droid_lkm_userns_proc_tid_hook);
 		droid_lkm_userns_proc_tid_orig = NULL;
 	}
 	if (droid_lkm_userns_proc_tgid_orig) {
-		hk_inline_unhook(&droid_lkm_userns_proc_tgid_hook);
+		hk_redir_remove(&droid_lkm_userns_proc_tgid_hook);
 		droid_lkm_userns_proc_tgid_orig = NULL;
 	}
 }
