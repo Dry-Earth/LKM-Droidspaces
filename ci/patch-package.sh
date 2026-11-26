@@ -21,6 +21,7 @@ fi
 cat > module/config.conf <<EOF
 modules=${modules}
 kmi_override=android15-6.6
+kmi=android15-6.6
 oplus=1
 EOF
 if [ -n "$misc" ]; then
