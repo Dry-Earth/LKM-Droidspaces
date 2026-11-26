@@ -18,7 +18,8 @@
 
 MODDIR=${0%/*}
 DATA=${DATA:-/data/adb/phdroid}
-CONF=$MODDIR/config.conf
+CONF=$DATA/config.conf
+[ -f "$CONF" ] || CONF=$MODDIR/config.conf
 LOG=$DATA/phdroid.log
 AUTO=$DATA/auto
 MARK=$DATA/insmod
@@ -248,6 +249,20 @@ status)
 	done
 	echo "---log---"
 	tail -n 30 "$LOG" 2>/dev/null
+	exit 0
+	;;
+install)
+	if [ -n "$2" ] && [ -f "$2" ]; then
+		mkdir -p "$DATA"
+		cp -f "$2" "$DATA/config.conf" 2>/dev/null
+		chmod 0644 "$DATA/config.conf" 2>/dev/null
+		log "config installed from $2"
+	elif [ -f "$MODDIR/config.conf" ]; then
+		mkdir -p "$DATA"
+		cp -f "$MODDIR/config.conf" "$DATA/config.conf" 2>/dev/null
+		chmod 0644 "$DATA/config.conf" 2>/dev/null
+		log "config installed from module"
+	fi
 	exit 0
 	;;
 reset)
