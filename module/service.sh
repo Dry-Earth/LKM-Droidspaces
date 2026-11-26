@@ -19,7 +19,9 @@
 MODDIR=${0%/*}
 DATA=${DATA:-/data/adb/phdroid}
 CONF=$DATA/config.conf
-[ -f "$CONF" ] || CONF=$MODDIR/config.conf
+if [ ! -f "$CONF" ] || ! grep -q '^modules=' "$CONF" 2>/dev/null; then
+	CONF=$MODDIR/config.conf
+fi
 LOG=$DATA/phdroid.log
 AUTO=$DATA/auto
 MARK=$DATA/insmod
