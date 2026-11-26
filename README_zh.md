@@ -1,32 +1,17 @@
-# droid_lkm
+# phDroid hummer（中文）
 
-[English](README.md) | 中文
+完整文档已经合并到 **[README.md](README.md)**（中文），这里只保留入口，避免两份
+文档内容不一致。
 
-面向原生 GKI 内核的树外内核模块，用于补全缺失的命名空间与 IPC 特性
-（`CONFIG_SYSVIPC`、`CONFIG_POSIX_MQUEUE`、`CONFIG_PID_NS`、`CONFIG_IPC_NS`）。
-无需重新编译内核或修改结构体布局，即可支持 Droidspaces 等容器运行时，同时保持与厂商模块的兼容性。
+快速导航：
 
-## 支持矩阵
+| 想看什么 | 去 README.md 的章节 |
+|---|---|
+| 这个 fork 实现了什么 | 1. 这个仓库实现了什么 |
+| 有哪些模块、默认加载哪些 | 2. 模块清单 |
+| 怎么安装、怎么手动加载、怎么开自启 | 3. 模块怎么用 |
+| 工作流怎么触发、输入是什么、产物在哪 | 4. 工作流怎么用 |
+| 已验证的版本与 sha256 | 5. 已验证状态 |
+| 和 `droidspaces_lkm` 的区别 | 6. 与 `droidspaces_lkm` 的取舍 |
 
-| 内核版本 | Android 版本 | 目标 |
-| :--- | :--- | :--- |
-| **5.10** | Android 12 | `android12-5.10` |
-| **5.10** | Android 13 | `android13-5.10` |
-| **5.15** | Android 13 | `android13-5.15` |
-| **5.15** | Android 14 | `android14-5.15` |
-| **6.1** | Android 14 | `android14-6.1` |
-| **6.6** | Android 15 | `android15-6.6` |
-| **6.12** | Android 16 | `android16-6.12` |
-| **6.18** | Android 17 | `android17-6.18` |
-
-## 贡献者
-
-见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
-
-## 致谢
-
-见 [CREDITS.md](CREDITS.md)。
-
-## 许可证
-
-[GPL-2.0](LICENSE)
+WebUI 的单独说明：[webui/README.md](webui/README.md)。
