@@ -139,8 +139,7 @@ __nocfi noinline int droid_lkm_userns_unshare_wrap(unsigned long flags)
 
 	ret = droid_lkm_userns_install_current(u);
 	if (ret)
-		droid_lkm_misc_warn("unshare: credential install failed: %d
-", ret);
+		droid_lkm_misc_warn("unshare: credential install failed: %d\n", ret);
 
 	hk_redir_leave(&droid_lkm_userns_unshare_hook);
 	return ret;
@@ -225,14 +224,12 @@ static int droid_lkm_userns_hook_one(struct hk_redir *h, const char *sym,
 	h->adjust = hk_kprobe_adjust_pad;
 	ret = hk_redir_install(h, sym, wrap, HK_REDIR_KPROBE);
 	if (ret) {
-		droid_lkm_misc_warn("hook %s failed: %d
-", sym, ret);
+		droid_lkm_misc_warn("hook %s failed: %d\n", sym, ret);
 		return ret;
 	}
 
 	*orig = (void *)h->orig;
-	droid_lkm_misc_dbg("hook %-28s addr=0x%lx orig=0x%lx
-", sym, h->addr,
+	droid_lkm_misc_dbg("hook %-28s addr=0x%lx orig=0x%lx\n", sym, h->addr,
 			   h->orig);
 
 	return 0;
