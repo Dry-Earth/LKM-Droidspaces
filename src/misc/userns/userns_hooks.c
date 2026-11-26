@@ -67,9 +67,7 @@ __nocfi noinline int droid_lkm_userns_nsproxy_wrap(unsigned long unshare_flags,
 	struct nsproxy *nsp;
 	int ret;
 
-	if (!hk_redir_guard_enter(&droid_lkm_userns_nsproxy_hook))
-		return droid_lkm_userns_nsproxy_orig(unshare_flags, new_nsp,
-						     new_cred, new_fs);
+	hk_redir_guard_enter(&droid_lkm_userns_nsproxy_hook);
 
 	u = droid_lkm_userns_of(current);
 	if (!u || new_cred ||
