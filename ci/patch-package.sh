@@ -14,7 +14,7 @@ if [ "$SAFE" = "true" ]; then
   modules="droid_lkm $misc"
   suffix="-safe"
 else
-  modules="droid_lkm $misc droid_lkm_vendor"
+  modules="droid_lkm $misc"
   suffix=""
 fi
 
