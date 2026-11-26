@@ -27,7 +27,7 @@ on:
         type: boolean
         default: false
       publish_release:
-        description: '构建成功后发布 Release'
+        description: '构建成功后发�?Release'
         required: true
         type: boolean
         default: true
@@ -37,7 +37,7 @@ on:
         type: string
         default: 'Dry-Earth/droidspaces-lkm'
       extras_sha:
-        description: 'extra 模块源码的固定 commit'
+        description: 'extra 模块源码的固�?commit'
         required: true
         type: string
         default: '522dc420b5119dcbb97b53ace62f99e1444d84a5'
@@ -292,6 +292,24 @@ jobs:
           cat module/config.conf
           cat module/module.prop
 
+      - name: Set up Node for the WebUI
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build the WebUI from webui/
+        run: |
+          set -eux
+          if [ -f webui/package.json ]; then
+            npm --prefix webui ci
+            VITE_PHDROID_FLAVOR=main-native VITE_OUT_DIR=dist npm --prefix webui run build
+            rm -rf module/webroot
+            mkdir -p module/webroot
+            cp -a webui/dist/. module/webroot/
+            ls -lh module/webroot | head -n 20
+          else
+            echo "webui/package.json not present; keeping module/webroot"
+          fi
       - name: Package KernelSU zip
         run: |
           set -eux
