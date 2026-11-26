@@ -349,11 +349,7 @@ droid_lkm_userns_proc_tgid_lookup(struct inode *dir, struct dentry *dentry,
 {
 	struct dentry *res;
 
-	if (!hk_redir_guard_enter(&droid_lkm_userns_proc_tgid_hook)) {
-		if (!droid_lkm_userns_proc_tgid_orig)
-			return ERR_PTR(-ENOENT);
-		return droid_lkm_userns_proc_tgid_orig(dir, dentry, flags);
-	}
+	hk_redir_guard_enter(&droid_lkm_userns_proc_tgid_hook);
 
 	if (!droid_lkm_userns_proc_tgid_orig) {
 		hk_redir_leave(&droid_lkm_userns_proc_tgid_hook);
@@ -372,11 +368,7 @@ droid_lkm_userns_proc_tid_lookup(struct inode *dir, struct dentry *dentry,
 {
 	struct dentry *res;
 
-	if (!hk_redir_guard_enter(&droid_lkm_userns_proc_tid_hook)) {
-		if (!droid_lkm_userns_proc_tid_orig)
-			return ERR_PTR(-ENOENT);
-		return droid_lkm_userns_proc_tid_orig(dir, dentry, flags);
-	}
+	hk_redir_guard_enter(&droid_lkm_userns_proc_tid_hook);
 
 	if (!droid_lkm_userns_proc_tid_orig) {
 		hk_redir_leave(&droid_lkm_userns_proc_tid_hook);
