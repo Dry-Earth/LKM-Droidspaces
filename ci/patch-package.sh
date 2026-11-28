@@ -1,5 +1,5 @@
 #!/bin/bash
-# 把上游 9f65632 的 module/ 改成 hummer 专用，并写入 build-id。
+# 把上游 687fd3c6 的 module/ 改成 hummer 专用，并写入 build-id。
 set -euxo pipefail
 
 SAFE=${SAFE_MODE:-false}
@@ -42,10 +42,10 @@ EOF
 sed -i \
   -e 's/^id=.*/id=phdroid/' \
   -e 's/^name=.*/name=phDroid hummer (LineageOS 24)/' \
-  -e "s/^version=.*/version=v2.0.0-hummer${suffix}/" \
-  -e 's/^versionCode=.*/versionCode=7/' \
+  -e "s/^version=.*/version=v2.0.4-hummer${suffix}/" \
+  -e 's/^versionCode=.*/versionCode=10/' \
   -e 's/^author=.*/author=Dere3046 XiYueSauce/' \
-  -e 's|^description=.*|description=phDroid for OnePlus Ace 5 Pro (hummer) / LineageOS 24 / 6.6.144. Upstream 9f65632 (fix panic / fix pid cache), exact KDIR + stock clang r596125. 默认不自动加载；先手动 load 验证。|' \
+  -e 's|^description=.*|description=phDroid for OnePlus Ace 5 Pro (hummer) / LineageOS 24 / 6.6.144. Upstream 687fd3c6 (v2.0.4, fix 6.1), exact KDIR + stock clang r596125. 默认不自动加载；先手动 load 验证。|' \
   module/module.prop
 
 echo "==> config.conf"

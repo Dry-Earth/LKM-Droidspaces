@@ -3,8 +3,8 @@
 完整说明（模块用途、安装、验证、排错）在 **[README.md](README.md)**。
 这一页只回答“选哪个 workflow、怎么填、产物叫什么”。
 
-本仓库只有一套实现：phDroid（上游 `Dere3046/_patchHarmony@9f65632` + 本 fork 的
-6.6 适配）。
+本仓库只有一套实现：phDroid（上游 `Dere3046/_patchHarmony@687fd3c6` / v2.0.4 +
+本 fork 的 6.6 适配）。
 
 ## 选哪个
 

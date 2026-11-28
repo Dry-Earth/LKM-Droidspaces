@@ -1,7 +1,7 @@
 # phDroid for OnePlus Ace 5 Pro (hummer)
 
 [`Dere3046/_patchHarmony`](https://github.com/Dere3046/_patchHarmony) 的 fork（上游基线
-`9f65632`），目标设备：
+`687fd3c6`，v2.0.4），目标设备：
 
 | 项目 | 值 |
 |---|---|
@@ -387,10 +387,10 @@ config/         hummer 内核配置（固定内核构建时兜底）
 
 ## 8. 维护
 
-- **上游同步点**：`Dere3046/_patchHarmony@9f65632`。上游再有 PID cache / panic
-  一类修复时，合并 `src/` 后重跑工作流。
+- **上游同步点**：`Dere3046/_patchHarmony@687fd3c6`（v2.0.4）。上游再有 6.1 /
+  IPC namespace / PID cache 一类修复时，合并 `src/` 后重跑工作流。
 - **不要在 Windows 上直接改 `patches/*.patch`**：CRLF 会让 `git apply` 失败；
   改完先本地按序 `git apply --check`。
 - **extras 的 pinned commit**：`extras_sha` 变了就等于换了 extras 源码，需要重编。
-- **版本号**：打包脚本写 `v2.0.0-hummer`；有 extras 时追加 `+extras`，`safe_mode`
+- **版本号**：打包脚本写 `v2.0.4-hummer`；有 extras 时追加 `+extras`，`safe_mode`
   时追加 `-safe`。
