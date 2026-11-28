@@ -85,7 +85,9 @@ extras 模块单独提供，避免重复注册。
 ### 1.5 加载器与 WebUI
 
 - `module/service.sh`：默认**不自动加载**，带 crash 计数 / blocked / 生存窗口等安全兜底
-- `webui/`：上游 React 页面，构建时以 `main-native` flavor 编进 `module/webroot`
+- WebUI 是 `module/webroot/` 里的预构建页面（`index.html` + `main.js`，经典脚本 +
+  `window.ksu.exec`），**不依赖构建**；`webui/` 下的 React 源码未接入发布
+  （Vite 产物是 ESM，KernelSU 以 `file://` 打开会被 CORS 拒绝 → 白屏）
 - WebUI 保存的配置写到 `/data/adb/phdroid/config.conf`，`service.sh` 优先读它
 - `service.sh install` 会复制配置并**真正加载一次**
 
@@ -303,7 +305,7 @@ gh workflow run build-hummer-ota-manifest.yml \
 7. 编 `droid_lkm` / `droid_lkm_misc`（+ `native` 后端）
 8. 按 stock config 编缺的 extras，写 `out/<KMI>/extra-modules.list`
 9. 改 `module/`：`config.conf` 只列实际编出来的模块，写 `build-id.txt`
-10. 用 `webui/` 编 WebUI（`VITE_PHDROID_FLAVOR=main-native`），覆盖 `module/webroot`
+10. 打包 `module/webroot` 的原样 WebUI（`index.html` + `main.js`，不做前端构建）
 11. 打包 `dist/phDroid-*.zip`，逐个校验“编出来的 `.ko` 都在 zip 里”
 12. 上传 artifact，按需发 Release
 
@@ -324,7 +326,8 @@ revision、每个 `.ko` 与 zip 的 sha256、每个模块的 vermagic —— 排
 ### 4.5 什么时候要重跑
 
 - OTA 换了（内核 `uname -r` 变化）→ 必须重跑，否则 preflight 会拒绝加载
-- 改了 `src/`、`patches`、`scripts/build_modules` 相关、`ci/*`、`module/*`、`webui/*`
+- 改了 `src/`、`patches`、`scripts/build_modules` 相关、`ci/*`、`module/*`
+  （包括 `module/webroot` 的 WebUI）
 - extras 仓库的 pinned commit 变了
 - 只改文档 / README → 不用重跑
 
@@ -336,6 +339,7 @@ revision、每个 `.ko` 与 zip 的 sha256、每个模块的 vermagic —— 排
 | `insmod: unknown symbol` | KMI 选错 / 内核已换；看 `build-info-manifest.txt` 的 release 与 vermagic |
 | 开机后没有模块 | 默认不自动加载 → `touch /data/adb/phdroid/auto` 或手动 `load` |
 | 自动加载被跳过 | `blocked` → `service.sh status` 看原因，`reset` 后 `load` |
+| WebUI 白屏 | 包里的 `module/webroot` 被 Vite 产物（ESM）覆盖了；KernelSU 以 `file://` 打开会拒绝 `type="module"`。重新打包，保留 `index.html` + `main.js` |
 | WebUI 打不开 | 包内 `webroot/` 是否完整；看 KernelSU 日志 |
 | 终端 `exit` 硬复位 | KernelSU LKM 模式 root，见上游 issue #15，与模块无关 |
 
@@ -389,7 +393,7 @@ v2.0.4 的情况：
 ```
 src/            phDroid 源码（上游 + 本 fork 的 6.6 适配）
 module/         KernelSU 模块模板（service.sh / config.conf / WebUI）
-webui/          WebUI 源码（React + Vite，main-native flavor）
+webui/          上游 React WebUI 源码（未接入发布；发布用 module/webroot）
 ci/             构建脚本（KDIR、LKM、extras、打包、manifest 工具）
 config/         hummer 内核配置（固定内核构建时兜底）
 .github/        workflow

@@ -302,24 +302,10 @@ jobs:
           cat module/config.conf
           cat module/module.prop
 
-      - name: Set up Node for the WebUI
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Build the WebUI from webui/
-        run: |
-          set -eux
-          if [ -f webui/package.json ]; then
-            npm --prefix webui ci
-            VITE_PHDROID_FLAVOR=main-native VITE_OUT_DIR=dist npm --prefix webui run build
-            rm -rf module/webroot
-            mkdir -p module/webroot
-            cp -a webui/dist/. module/webroot/
-            ls -lh module/webroot | head -n 20
-          else
-            echo "webui/package.json not present; keeping module/webroot"
-          fi
+      # 保持 module/webroot 原样（index.html + main.js）。
+      # webui/ 的 React 应用是 ESM + 哈希资源，KernelSU WebUI 以 file:// 打开，
+      # WebView 会按 CORS 拒绝 type="module" 脚本，结果就是白屏。上游发布包
+      # 也从未用它，所以这里不要用 vite 产物覆盖。
 
       - name: Package KernelSU zip
         run: |
