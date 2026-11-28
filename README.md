@@ -341,19 +341,31 @@ revision、每个 `.ko` 与 zip 的 sha256、每个模块的 vermagic —— 排
 
 ---
 
-## 5. 已验证状态（2026-11-26）
+## 5. 已验证状态（2026-11-28）
 
-设备：OnePlus Ace 5 Pro / LineageOS 24 / `boot-20261120-finasu-v3`
+设备：OnePlus Ace 5 Pro / LineageOS 24
 
-| 项目 | 结果 |
-|---|---|
-| Release | `phdroid-ota-manifest-45849529575` |
-| ZIP | `phDroid-v2.0.0-hummer+extras.zip` |
-| sha256 | `649c1cf99d1fa38a997af2f39843ad6657cb368482250fc6814212feb9e2cd95` |
-| `droidspaces check` | **全绿**，含 `Sandboxing (user namespaces)` |
-| 模块 | 8 个全部加载（该版本仍包含 `droid_lkm_vendor`；之后默认不再加载） |
-| userns | 模拟：`unshare` 成功、`/proc/<pid>/ns/user` 存在，无真实映射 |
-| userns 自检 `mount tmpfs -13` | SELinux `u:r:kernel:s0` 的 `mounton` 拒绝，不影响 check |
+| 版本 | 构建输入 | ZIP sha256 | 状态 |
+|---|---|---|---|
+| v2.0.0 | `boot-20261120-finasu-v3.img` + 20261120 manifest | `649c1cf99d1fa38a997af2f39843ad6657cb368482250fc6814212feb9e2cd95` | **已在设备验证** |
+| v2.0.4 | `boot-20261120-finasu-v3.img` + 20261120 manifest | `27c9d40a4161b51f4071ff9f3da4c3ef7fddc46a686548affef02e9a22253801` | 待设备验证 |
+| v2.0.4 | 官方 `20261127/boot.img` + 20261127 manifest | `82899ae06f1d77543e3a12d1b2335bced66607e9ea55d9fc96f87269006929fe` | 待设备验证；`.ko` 与上一行逐字节相同 |
+
+v2.0.0 的设备实测：
+
+- `droidspaces check` **全绿**，含 `Sandboxing (user namespaces)`
+- 8 个模块全部加载（该版本仍包含 `droid_lkm_vendor`；之后默认不再加载）
+- userns 是模拟实现：`unshare` 成功、`/proc/<pid>/ns/user` 存在，无真实映射
+- userns 自检里的 `mount tmpfs -13` 是 SELinux `u:r:kernel:s0` 的 `mounton` 拒绝，不影响 check
+
+v2.0.4 的情况：
+
+- 合并了上游 `687fd3c6`（v2.0.4，`fix 6.1`：IPC namespace 的 kernel-owned adopt 路径 + workqueue 退休 + `DS_HOOK_RECORDS 16`）
+- 保留本 fork 的 6.6 版 `ds_slot.c`（不含 5.15 的 `do_exit` 清理钩子）
+- 20261127 OTA 的 kernel commit 与 20261120 相同（`01ee97578…`），所以 8 个 `.ko`
+  与 20261120 输入编出来的**逐字节相同**；zip sha 不同只因 `build-id.txt` 里记录了新的
+  `modules` revision
+- 仍需在设备上确认：开机正常、`boot-completed` 清零、容器起停与 `unshare -i` 无异常
 
 ---
 
